@@ -1,0 +1,470 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Simple utility to check for video processing dependencies:
+- FFmpeg and FFProbe availability
+- NVIDIA drivers
+- NVENC hardware encoding support
+"""
+
+import os
+import sys
+import re
+import logging
+import subprocess
+import shutil
+from pathlib import Path
+
+def setup_logging(log_file=None):
+    """Set up basic logging"""
+    # Check if logging is already configured (to avoid duplicate handlers)
+    if len(logging.getLogger().handlers) > 0:
+        return
+        
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(levelname)s:%(message)s",
+        handlers=[logging.StreamHandler()]
+    )
+    
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        logging.getLogger().addHandler(file_handler)
+
+def run_command(cmd):
+    """Run a command and return its output"""
+    try:
+        result = subprocess.run(
+            cmd, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE, 
+            text=True, 
+            timeout=10
+        )
+        return {
+            "success": result.returncode == 0,
+            "stdout": result.stdout,
+            "stderr": result.stderr
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "stdout": "",
+            "stderr": str(e)
+        }
+
+def find_executable(name):
+    """Find an executable, prioritizing bundled versions with the application"""
+    # First check the directory where the script is located
+    app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    
+    # Check if running from VSCode debugger
+    debug_mode = 'debugpy' in sys.modules or any('debug' in arg.lower() for arg in sys.argv)
+    if debug_mode:
+        logging.debug("Running in debug mode - will also check development paths")
+    
+    # List of possible locations to check - prioritize bundled locations
+    exe_name = f"{name}.exe" if sys.platform == "win32" else name
+    locations = [
+        # Bundled with application (highest priority)
+        os.path.join(app_dir, exe_name),
+        os.path.join(app_dir, "ffmpeg", exe_name),
+        os.path.join(app_dir, "bin", exe_name),
+    ]
+    
+    # Debug-specific paths
+    if debug_mode:
+        # Add VSCode debug paths
+        vscode_paths = [
+            # Common development paths
+            os.path.abspath(os.path.join(app_dir, "..", "ffmpeg", exe_name)),
+            os.path.abspath(os.path.join(app_dir, "..", "..", "ffmpeg", exe_name)),
+        ]
+        locations.extend(vscode_paths)
+    
+    # Check specific locations first
+    for location in locations:
+        if os.path.isfile(location) and os.access(location, os.X_OK):
+            return location
+    
+    # Fall back to PATH if bundled version not found
+    return shutil.which(name)
+
+def check_ffmpeg_availability():
+    """Check if FFmpeg and FFprobe are available"""
+    results = {
+        "ffmpeg": {"available": False, "path": None, "version": None, "is_bundled": False},
+        "ffprobe": {"available": False, "path": None, "version": None, "is_bundled": False},
+        "hardware_accel": {
+            "nvenc": False,
+            "hevc_nvenc": False,
+            "qsv": False,
+            "vaapi": False,
+            "amf": False
+        }
+    }
+    
+    # Get application directory
+    app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    
+    # Check for FFmpeg
+    ffmpeg_path = find_executable("ffmpeg")
+    if ffmpeg_path:
+        results["ffmpeg"]["available"] = True
+        results["ffmpeg"]["path"] = ffmpeg_path
+        
+        # Check if using bundled version
+        results["ffmpeg"]["is_bundled"] = app_dir in ffmpeg_path
+        bundled_str = " (bundled)" if results["ffmpeg"]["is_bundled"] else ""
+        
+        # Get version
+        version_result = run_command([ffmpeg_path, "-version"])
+        if version_result["success"]:
+            first_line = version_result["stdout"].split("\n")[0]
+            version_match = re.search(r'version\s+(\S+)', first_line)
+            if version_match:
+                results["ffmpeg"]["version"] = version_match.group(1)
+                logging.info(f"FFmpeg found: {ffmpeg_path}{bundled_str} (version {version_match.group(1)})")
+            else:
+                logging.info(f"FFmpeg found: {ffmpeg_path}{bundled_str}")
+        
+        # Check for hardware acceleration (avoiding duplicate logs)
+        encoders_result = run_command([ffmpeg_path, "-encoders"])
+        if encoders_result["success"]:
+            # Track which ones we've already logged
+            logged_encoders = set()
+            
+            for line in encoders_result["stdout"].split("\n"):
+                # Check for NVENC (NVIDIA)
+                if "nvenc" in line and not results["hardware_accel"]["nvenc"]:
+                    results["hardware_accel"]["nvenc"] = True
+                    if "nvenc" not in logged_encoders:
+                        logging.info("NVENC hardware encoding available")
+                        logged_encoders.add("nvenc")
+                    
+                # Check for HEVC_NVENC (NVIDIA H.265)
+                if "hevc_nvenc" in line:
+                    results["hardware_accel"]["hevc_nvenc"] = True
+                
+                # Check for QSV (Intel QuickSync)
+                if "qsv" in line and not results["hardware_accel"]["qsv"]:
+                    results["hardware_accel"]["qsv"] = True
+                    if "qsv" not in logged_encoders:
+                        logging.info("Intel QuickSync hardware encoding available")
+                        logged_encoders.add("qsv")
+                
+                # Check for VAAPI (Linux VA-API)
+                if "vaapi" in line and not results["hardware_accel"]["vaapi"]:
+                    results["hardware_accel"]["vaapi"] = True
+                    if "vaapi" not in logged_encoders:
+                        logging.info("VAAPI hardware encoding available")
+                        logged_encoders.add("vaapi")
+                
+                # Check for AMF (AMD)
+                if "amf" in line and not results["hardware_accel"]["amf"]:
+                    results["hardware_accel"]["amf"] = True
+                    if "amf" not in logged_encoders:
+                        logging.info("AMD AMF hardware encoding available")
+                        logged_encoders.add("amf")
+    else:
+        logging.warning("❌ FFmpeg not found")
+    
+    # Check for FFprobe
+    ffprobe_path = find_executable("ffprobe")
+    if ffprobe_path:
+        results["ffprobe"]["available"] = True
+        results["ffprobe"]["path"] = ffprobe_path
+        
+        # Check if using bundled version
+        results["ffprobe"]["is_bundled"] = app_dir in ffprobe_path
+        bundled_str = " (bundled)" if results["ffprobe"]["is_bundled"] else ""
+        
+        logging.info(f"FFprobe found: {ffprobe_path}{bundled_str}")
+    else:
+        logging.warning("❌ FFprobe not found")
+    
+    return results
+
+def check_nvidia():
+    """Check if NVIDIA drivers are installed and GPU is available"""
+    results = {
+        "drivers_installed": False,
+        "driver_version": None,
+        "gpu_model": None
+    }
+    
+    # Try to run nvidia-smi
+    nvidia_smi = "nvidia-smi"
+    if sys.platform == "win32":
+        # Check common paths on Windows
+        potential_paths = [
+            os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"),
+            os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "System32", "nvidia-smi.exe")
+        ]
+        
+        for path in potential_paths:
+            if os.path.isfile(path):
+                nvidia_smi = path
+                break
+    
+    # Run nvidia-smi to check for drivers and version
+    result = run_command([nvidia_smi])
+    if result["success"]:
+        results["drivers_installed"] = True
+        
+        # Get driver version
+        driver_match = re.search(r'Driver Version: (\d+\.\d+(?:\.\d+)?)', result["stdout"])
+        if driver_match:
+            results["driver_version"] = driver_match.group(1)
+            logging.info(f"NVIDIA drivers found: version {driver_match.group(1)}")
+        else:
+            logging.info("NVIDIA drivers found, but couldn't determine version")
+        
+        # Try to get GPU model - clean up output for better logging
+        for line in result["stdout"].split("\n"):
+            if "|" in line and "%" in line:
+                parts = line.split("|")
+                if len(parts) >= 2:
+                    gpu_model = parts[1].strip()
+                    # Try to extract just the model name, not usage data
+                    model_match = re.search(r'(NVIDIA\s+[A-Za-z0-9]+(?:\s+[A-Za-z0-9]+)*)', gpu_model)
+                    if model_match:
+                        gpu_model = model_match.group(1).strip()
+                    if gpu_model:
+                        results["gpu_model"] = gpu_model
+                        logging.info(f"NVIDIA GPU: {gpu_model}")
+                        break
+    else:
+        logging.warning("NVIDIA drivers not detected or not working")
+    
+    return results
+
+def main():
+    """Main function"""
+    setup_logging()
+    
+    # Check for debug mode
+    debug_mode = 'debugpy' in sys.modules or any('debug' in arg.lower() for arg in sys.argv)
+    if debug_mode:
+        logging.info("Running in debug mode")
+    
+    logging.info("Checking video processing dependencies...")
+    
+    # Check FFmpeg and FFprobe
+    ffmpeg_results = check_ffmpeg_availability()
+    
+    # Check NVIDIA GPU
+    nvidia_results = check_nvidia()
+    
+    # Flag to track critical issues
+    critical_issues = False
+    
+    # Summary
+    logging.info("\n----- Dependency Check Summary -----")
+    
+    # Check FFmpeg
+    if ffmpeg_results["ffmpeg"]["available"]:
+        bundled_str = " (bundled)" if ffmpeg_results["ffmpeg"]["is_bundled"] else ""
+        logging.info(f"✅ FFmpeg: Available{bundled_str} ({ffmpeg_results['ffmpeg']['path']})")
+    else:
+        logging.error("❌ FFmpeg: Not found")
+        critical_issues = True
+        
+    # Check FFprobe
+    if ffmpeg_results["ffprobe"]["available"]:
+        bundled_str = " (bundled)" if ffmpeg_results["ffprobe"]["is_bundled"] else ""
+        logging.info(f"✅ FFprobe: Available{bundled_str} ({ffmpeg_results['ffprobe']['path']})")
+    else:
+        logging.error("❌ FFprobe: Not found")
+        critical_issues = True
+    
+    # Hardware acceleration
+    hw_accel = [k for k, v in ffmpeg_results["hardware_accel"].items() if v]
+    if hw_accel:
+        logging.info(f"✅ Hardware acceleration: {', '.join(hw_accel)}")
+    else:
+        logging.warning("⚠️ No hardware acceleration available")
+    
+    # NVIDIA - check driver version meets minimum requirements (576.02)
+    MINIMUM_DRIVER_VERSION = "576.02"
+    
+    if nvidia_results["drivers_installed"]:
+        if nvidia_results["driver_version"]:
+            current_version = nvidia_results["driver_version"]
+            
+            # Compare versions
+            if _compare_versions(current_version, MINIMUM_DRIVER_VERSION) >= 0:
+                logging.info(f"✅ NVIDIA drivers: Available (version {current_version})")
+            else:
+                logging.error(f"❌ NVIDIA drivers: Version {current_version} is too old (minimum required: {MINIMUM_DRIVER_VERSION})")
+                critical_issues = True
+                
+            # Check if NVENC is available
+            if ffmpeg_results["hardware_accel"]["nvenc"]:
+                logging.info("✅ NVENC hardware encoding is available")
+            else:
+                logging.warning("⚠️ NVIDIA GPU detected but NVENC encoding is not available in FFmpeg")
+        else:
+            logging.warning("⚠️ NVIDIA drivers found but version could not be determined")
+    else:
+        logging.warning("⚠️ NVIDIA drivers not detected")
+    
+    # Exit with error code if critical issues found
+    if critical_issues:
+        logging.error("\n❌ Critical dependency issues found. Application will exit.")
+        return 1
+        
+    return 0
+
+
+def _compare_versions(version1, version2):
+    """Compare two version strings, returns:
+    -1 if version1 < version2
+     0 if version1 == version2
+     1 if version1 > version2
+    """
+    v1_parts = [int(x) for x in version1.split('.')]
+    v2_parts = [int(x) for x in version2.split('.')]
+    
+    # Pad with zeros to make lengths equal
+    max_length = max(len(v1_parts), len(v2_parts))
+    v1_parts += [0] * (max_length - len(v1_parts))
+    v2_parts += [0] * (max_length - len(v2_parts))
+    
+    # Compare each part
+    for i in range(max_length):
+        if v1_parts[i] < v2_parts[i]:
+            return -1
+        elif v1_parts[i] > v2_parts[i]:
+            return 1
+            
+    # If we get here, versions are equal
+    return 0
+
+if __name__ == "__main__":
+    exit_code = main()
+    if exit_code != 0:
+        # If running as a script directly, exit with error code
+        sys.exit(exit_code)
+    
+# Function that can be called from external applications
+def check_dependencies(exit_on_error=True, show_popup=True):
+    """Check if all required dependencies are available
+    
+    Args:
+        exit_on_error: If True, exit the application if critical dependencies are missing
+        show_popup: If True, show a message box for critical errors
+        
+    Returns:
+        Tuple of (success, results) where:
+            - success: True if all critical dependencies met, False otherwise
+            - results: Dictionary with results of dependency checks
+    """
+    # Check for debug mode
+    debug_mode = 'debugpy' in sys.modules or any('debug' in arg.lower() for arg in sys.argv)
+    if debug_mode:
+        logging.info("Running in debug mode")
+    
+    logging.info("Checking video processing dependencies...")
+    
+    # Check FFmpeg and FFprobe
+    ffmpeg_results = check_ffmpeg_availability()
+    
+    # Check NVIDIA GPU
+    nvidia_results = check_nvidia()
+    
+    # Create combined results
+    results = {
+        "ffmpeg": ffmpeg_results["ffmpeg"],
+        "ffprobe": ffmpeg_results["ffprobe"],
+        "hardware_accel": ffmpeg_results["hardware_accel"],
+        "nvidia": nvidia_results
+    }
+    
+    # Flag to track critical issues
+    critical_issues = False
+    error_message = "Critical dependency issues found:\n\n"
+    
+    # Summary
+    logging.info("\n----- Dependency Check Summary -----")
+    
+    # Check FFmpeg
+    if ffmpeg_results["ffmpeg"]["available"]:
+        bundled_str = " (bundled)" if ffmpeg_results["ffmpeg"]["is_bundled"] else ""
+        logging.info(f"✅ FFmpeg: Available{bundled_str} ({ffmpeg_results['ffmpeg']['path']})")
+    else:
+        error_message += "❌ FFmpeg not found. Video processing will not work.\n"
+        logging.error("❌ FFmpeg: Not found")
+        critical_issues = True
+        
+    # Check FFprobe
+    if ffmpeg_results["ffprobe"]["available"]:
+        bundled_str = " (bundled)" if ffmpeg_results["ffprobe"]["is_bundled"] else ""
+        logging.info(f"✅ FFprobe: Available{bundled_str} ({ffmpeg_results['ffprobe']['path']})")
+    else:
+        error_message += "❌ FFprobe not found. Video analysis will not work.\n"
+        logging.error("❌ FFprobe: Not found")
+        critical_issues = True
+    
+    # Hardware acceleration
+    hw_accel = [k for k, v in ffmpeg_results["hardware_accel"].items() if v]
+    if hw_accel:
+        logging.info(f"✅ Hardware acceleration: {', '.join(hw_accel)}")
+    else:
+        logging.warning("⚠️ No hardware acceleration available")
+    
+    # NVIDIA - check driver version meets minimum requirements (576.02)
+    MINIMUM_DRIVER_VERSION = "576.02"
+    
+    if nvidia_results["drivers_installed"]:
+        if nvidia_results["driver_version"]:
+            current_version = nvidia_results["driver_version"]
+            
+            # Compare versions
+            if _compare_versions(current_version, MINIMUM_DRIVER_VERSION) >= 0:
+                logging.info(f"✅ NVIDIA drivers: Available (version {current_version})")
+            else:
+                error_message += f"❌ NVIDIA driver version {current_version} is too old. Minimum required: {MINIMUM_DRIVER_VERSION}\n"
+                logging.error(f"❌ NVIDIA drivers: Version {current_version} is too old (minimum required: {MINIMUM_DRIVER_VERSION})")
+                critical_issues = True
+                
+            # Check if NVENC is available
+            if ffmpeg_results["hardware_accel"]["nvenc"]:
+                logging.info("✅ NVENC hardware encoding is available")
+            else:
+                logging.warning("⚠️ NVIDIA GPU detected but NVENC encoding is not available in FFmpeg")
+        else:
+            logging.warning("⚠️ NVIDIA drivers found but version could not be determined")
+    else:
+        logging.warning("⚠️ NVIDIA drivers not detected")
+    
+    # Handle critical issues
+    if critical_issues:
+        logging.error("\n❌ Critical dependency issues found.")
+        
+        # Show message box if requested
+        if show_popup:
+            try:
+                import tkinter as tk
+                from tkinter import messagebox
+                
+                # Create temporary root window
+                root = tk.Tk()
+                root.withdraw()  # Hide the root window
+                
+                # Show error message
+                messagebox.showerror("Dependency Check Failed", error_message)
+                
+                # Destroy the root window
+                root.destroy()
+            except Exception as e:
+                logging.error(f"Failed to show message box: {e}")
+        
+        # Exit if requested
+        if exit_on_error:
+            logging.error("Application will exit due to critical dependency issues.")
+            sys.exit(1)
+            
+    return (not critical_issues, results)

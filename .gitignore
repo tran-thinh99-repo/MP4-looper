@@ -1,0 +1,54 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build directories and files
+build/
+dist/
+MP4 Looper build/
+*.spec
+*.exe
+
+# Credentials and sensitive data
+credentials.json
+*.key
+*.pem
+
+# Debug and log files
+debug.log
+*.log
+
+# User-specific settings
+settings.json
+folder_id_map.json
+
+# Temporary files
+temp_music.wav
+music_concat.txt
+*_song_list.txt
+*_song_list_timestamp.txt
+*_song_list_timestamp_full.txt
+
+# Downloaded media and backups
+*.mp4
+*.wav
+reggae_music_backup.csv
+*.csv
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+
+# FFmpeg downloads
+ffmpeg.zip
+ffmpeg/
+
+# Bat files
+git_init.bat
