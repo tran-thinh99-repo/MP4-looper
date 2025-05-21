@@ -6,79 +6,10 @@ import random
 import unicodedata
 import subprocess
 from datetime import datetime
-from tkinter import messagebox
-
-from config import OFFLINE_CSV_BACKUP
 from utils import get_base_path, format_timestamp
 from post_render_check import get_wav_duration
 
 logging.debug(f"✅ {os.path.basename(__file__)} loaded successfully")
-
-def read_from_csv_backup():
-    try:
-        logging.debug(f"📂 Reading CSV file from: {OFFLINE_CSV_BACKUP}")
-        with open(OFFLINE_CSV_BACKUP, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            header = next(reader, None)  # skip header
-            songs_raw, weeks_raw = [], []
-            last_week = ""
-
-            for row in reader:
-                # Index 2 = Column C (Song), Index 4 = Column E (Week)
-                if len(row) >= 2:
-                    a = row[0].strip()
-                    b = row[1].strip()
-                    if a.isdigit() and b:
-                        song = f"{a}_{b}"
-                    else:
-                        song = ""
-                else:
-                    song = ""
-
-                week = row[4].strip() if len(row) > 4 else ""
-
-                # Fill down the last known week if current is empty
-                if not week and last_week:
-                    week = last_week
-                elif week:
-                    last_week = week
-
-                logging.debug(f"Parsed row (by index) - Week: '{week}', Song: '{song}'")
-                # 🧹 Final filter here to avoid garbage songs
-                if (
-                    song and
-                    "_" in song and
-                    song.split("_")[0].isdigit()
-                ):
-                    if len(songs_raw) < 5:  # ✅ Log first 5 only
-                        logging.debug(f"✅ RAW SONG STRING: {repr(song)}")
-                    songs_raw.append(song)
-                    weeks_raw.append(week)
-                else:
-                    logging.debug(f"⏭️ Skipped invalid parsed song: '{song}'")
-
-            return weeks_raw, songs_raw
-    except Exception as e:
-        logging.error(f"Failed to read from CSV backup: {e}")
-        return None, None
-
-def download_csv_public_backup(sheet_url):
-    try:
-        logging.info(f"📥 Downloading CSV from user URL: {sheet_url}")
-        response = requests.get(sheet_url, timeout=10)
-        response.raise_for_status()
-
-        with open(OFFLINE_CSV_BACKUP, "w", encoding="utf-8", newline="") as f:
-            f.write(response.text)
-        logging.info(f"✅ Downloaded and saved backup to: {OFFLINE_CSV_BACKUP}")
-        return True
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"❌ Error downloading sheet: {e}")
-        return False
-    except Exception as e:
-        logging.error(f"❌ Unexpected error downloading CSV: {e}")
-        return False
 
 def generate_song_list_from_google_sheet(
     sheet_url,
@@ -88,13 +19,11 @@ def generate_song_list_from_google_sheet(
     output_folder,
     new_song_count=5,
     export_song_list=True,
-    export_timestamp=True,
-    skip_download=False,  # Parameter kept for backward compatibility but not used
-    direct_sheet_access=True  # Always use direct access
+    export_timestamp=True
 ):
     logging.debug(f"🧪 generate_song_list_from_google_sheet() called")
     try:
-        # Only use direct Google Sheet access
+        # Use direct Google Sheet access
         logging.info(f"📊 Reading directly from Google Sheet: {sheet_url}")
         try:
             response = requests.get(sheet_url, timeout=10)
@@ -110,7 +39,7 @@ def generate_song_list_from_google_sheet(
             last_week = ""
             
             for row in reader:
-                # Parsing logic similar to read_from_csv_backup
+                # Parse song and week information
                 if len(row) >= 2:
                     a = row[0].strip()
                     b = row[1].strip()
@@ -130,13 +59,13 @@ def generate_song_list_from_google_sheet(
                     last_week = week
 
                 logging.debug(f"Parsed row (by index) - Week: '{week}', Song: '{song}'")
-                # 🧹 Final filter here to avoid garbage songs
+                # Filter to avoid garbage songs
                 if (
                     song and
                     "_" in song and
                     song.split("_")[0].isdigit()
                 ):
-                    if len(songs_raw) < 5:  # ✅ Log first 5 only
+                    if len(songs_raw) < 5:  # Log first 5 only
                         logging.debug(f"✅ RAW SONG STRING: {repr(song)}")
                     songs_raw.append(song)
                     weeks_raw.append(week)
@@ -188,7 +117,7 @@ def generate_song_list_from_google_sheet(
         total_duration = 0
         if duration_in_seconds and music_folder:
             def try_add(song):
-                song = unicodedata.normalize("NFC", song)  # 🆕 normalize the song name itself
+                song = unicodedata.normalize("NFC", song)  # normalize the song name itself
                 path = os.path.join(music_folder, f"{song}.wav")
                 if not os.path.isfile(path):
                     missing_files.append(f"{song}.wav")
@@ -236,7 +165,7 @@ def generate_song_list_from_google_sheet(
 
         if missing_files:
             logging.warning(f"⚠️ Missing {len(missing_files)} WAV files: {missing_files}")
-            return ("missing", sorted(set(missing_files)))  # <-- Return for UI to handle safely
+            return ("missing", sorted(set(missing_files)))  # Return for UI to handle safely
 
         # 3. Export list
         if export_song_list:
@@ -257,7 +186,7 @@ def generate_song_list_from_google_sheet(
 
                 current_time = 0
                 for song in selected_songs:
-                    song = unicodedata.normalize("NFC", song)  # 🆕 normalize before using
+                    song = unicodedata.normalize("NFC", song)  # normalize before using
                     path = os.path.join(music_folder, f"{song}.wav")
 
                     if not os.path.isfile(path):
@@ -265,17 +194,17 @@ def generate_song_list_from_google_sheet(
 
                     timestamp = format_timestamp(current_time)
 
-                    # ✅ Stripped version (sheet note)
+                    # Stripped version (sheet note)
                     f_stripped.write(f"{timestamp} {song.split('_', 1)[-1]}\n")
 
-                    # ✅ Full version (prefix kept, for Drive backup)
+                    # Full version (prefix kept, for Drive backup)
                     f_full.write(f"{timestamp} {song}\n")
 
                     current_time += get_wav_duration(path)
 
             logging.info(f"⏱️ Timestamps saved to: {timestamp_path}")
         
-        # NEW SECTION: Create temp_music.wav file
+        # Create temp_music.wav file
         # Generate the concatenation file for ffmpeg
         concat_file_path = os.path.join(output_folder, "music_concat.txt")
         with open(concat_file_path, "w", encoding="utf-8") as f:
@@ -326,30 +255,6 @@ def generate_song_list_from_google_sheet(
         logging.error(f"❌ Failed to generate song list: {e}")
         return None
 
-def validate_song_csv_format(csv_path):
-    """Checks if column C == A + '_' + B in the downloaded CSV."""
-    mismatches = []
-    with open(csv_path, "r", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        next(reader, None)  # skip header
-        for row in reader:
-            if len(row) < 3:
-                continue
-
-            a = row[0].strip()
-            b = row[1].strip()
-            c = row[2].strip()
-
-            if not b:
-                continue  # Skip validation if column B (Song Name) is empty
-
-            expected = f"{a}_{b}".strip()
-            if c != expected:
-                logging.debug(f"[CHECK] A='{a}', B='{b}', C='{c}', Expected='{expected}'")
-                mismatches.append((a, b, c, expected))
-
-    return mismatches
-
 def validate_csv_rows(csv_lines):
     """Shared logic for both online and offline sources."""
     import csv
@@ -385,158 +290,3 @@ def validate_online_sheet(sheet_url):
     except Exception as e:
         logging.error(f"❌ Exception validating sheet: {e}")
         return None
-
-def clean_and_save_valid_rows_from_online_sheet(sheet_url):
-    try:
-        logging.info("🧹 Cleaning online sheet: removing invalid/mismatched rows...")
-
-        response = requests.get(sheet_url)
-        if response.status_code != 200:
-            logging.error(f"❌ Failed to fetch online sheet: HTTP {response.status_code}")
-            return False
-
-        lines = response.text.splitlines()
-        reader = csv.reader(lines)
-        _ = next(reader, None)  # Skip original header
-
-        valid_rows = [["A", "B", "C", "D", "Week"]]
-        cleaned_count = 0
-        skipped_count = 0
-        last_week = ""
-
-        for row in reader:
-            if len(row) < 3:
-                skipped_count += 1
-                continue
-
-            row += [""] * (5 - len(row))
-
-            a = row[0].strip()
-            b = row[1].strip()
-            week = row[4].strip()
-
-            if not week:
-                week = last_week
-            elif week:
-                last_week = week
-
-            if not a.isdigit() or not b or not week:
-                skipped_count += 1
-                continue
-
-            expected_c = f"{a}_{b}"
-            valid_rows.append([a, b, expected_c, '', week])
-            cleaned_count += 1
-
-        if os.path.exists(OFFLINE_CSV_BACKUP):
-            os.remove(OFFLINE_CSV_BACKUP)
-            logging.debug(f"🗑️ Deleted previous version of: {OFFLINE_CSV_BACKUP}")
-
-        temp_path = OFFLINE_CSV_BACKUP + ".tmp"
-        with open(temp_path, "w", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerows(valid_rows)
-            f.flush()
-            os.fsync(f.fileno())
-
-        os.replace(temp_path, OFFLINE_CSV_BACKUP)
-        logging.debug(f"📝 Overwrote {OFFLINE_CSV_BACKUP} with cleaned version.")
-
-        logging.info(f"✅ Cleaned sheet saved with {cleaned_count} valid rows. Skipped {skipped_count} bad rows.")
-        return True
-
-    except Exception as e:
-        logging.error(f"❌ Exception during cleanup: {e}")
-        return False
-
-def fix_and_download_sheet(sheet_url, parent_window=None):
-    try:
-        logging.info("⬇️ Downloading sheet for cleaning...")
-
-        response = requests.get(sheet_url)
-        if response.status_code != 200:
-            raise Exception(f"HTTP {response.status_code}")
-
-        lines = response.text.splitlines()
-        reader = csv.reader(lines)
-        _ = next(reader, None)  # Skip header
-
-        valid_rows = [["A", "B", "C", "D", "Week"]]
-        seen_keys = set()
-        duplicate_keys = []
-        garbage_rows = []
-        skipped_count = 0
-        added_count = 0
-        last_week = ""
-        garbage_triggered = False
-
-        for row in reader:
-            row += [""] * (5 - len(row))
-            a = row[0].strip()
-            b = row[1].strip()
-            week = row[4].strip()
-
-            # Skip junk after first garbage row
-            if garbage_triggered:
-                garbage_rows.append(" | ".join(row[:3]))
-                skipped_count += 1
-                continue
-
-            # Garbage row: A is not digits or B is empty
-            if not a.isdigit() or not b:
-                garbage_triggered = True
-                garbage_rows.append(" | ".join(row[:3]))
-                skipped_count += 1
-                continue
-
-            # Fill down week
-            if not week:
-                week = last_week
-            else:
-                last_week = week
-
-            key = f"{a}_{b}"
-            if key in seen_keys:
-                duplicate_keys.append(key)
-                continue
-            seen_keys.add(key)
-
-            valid_rows.append([a, b, key, "", week])
-            added_count += 1
-
-        # Save cleaned CSV
-        temp_path = OFFLINE_CSV_BACKUP + ".tmp"
-        with open(temp_path, "w", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerows(valid_rows)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temp_path, OFFLINE_CSV_BACKUP)
-
-        logging.info(f"✅ Cleaned sheet saved with {added_count} valid rows. Skipped {skipped_count} bad rows.")
-
-        if duplicate_keys:
-            preview = "\n".join(duplicate_keys[:10])
-            more = f"\n… and {len(duplicate_keys) - 10} more." if len(duplicate_keys) > 10 else ""
-            messagebox.showwarning(
-                "Duplicate Songs Skipped",
-                f"⚠️ Skipped {len(duplicate_keys)} duplicate songs:\n\n{preview}{more}",
-                parent=parent_window
-            )
-            logging.warning("⚠️ Skipped duplicates:\n" + "\n".join(duplicate_keys))
-
-        if garbage_rows:
-            preview = "\n".join(garbage_rows[:10])
-            more = f"\n… and {len(garbage_rows) - 10} more." if len(garbage_rows) > 10 else ""
-            logging.warning(f"🧹 Skipped {len(garbage_rows)} garbage rows after valid songs:\n" + "\n".join(garbage_rows))
-            print(f"🧹 Skipped {len(garbage_rows)} garbage rows after valid songs (see debug log for details).")
-
-            logging.warning("🧹 Skipped garbage rows:\n" + "\n".join(garbage_rows))
-
-        return True
-
-    except Exception as e:
-        logging.error(f"❌ Failed to fix and download sheet: {e}")
-        if parent_window:
-            messagebox.showerror("Download Failed", str(e), parent=parent_window)
-        return False

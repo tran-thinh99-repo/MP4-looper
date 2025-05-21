@@ -3,10 +3,7 @@ import os
 import subprocess
 import tkinter as tk
 import logging
-import urllib.request
-import zipfile
-import shutil
-import winreg
+import time
 import re
 import json
 import threading
@@ -14,7 +11,7 @@ import ctypes
 import concurrent.futures
 from pathlib import Path
 from tkinter import messagebox
-from config import FFMPEG_URL, FFMPEG_ZIP, FFMPEG_DIR, FFMPEG_BIN, FFPROBE_BIN, SCOPES, SERVICE_ACCOUNT_PATH
+from config import SCOPES, SERVICE_ACCOUNT_PATH
 from paths import get_base_path
 
 from google.oauth2 import service_account
@@ -70,92 +67,6 @@ def upload_to_drive(local_path, folder_id, service, override_name=None, progress
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(do_upload_chunks)
         return future.result()
-    
-def is_tool_available(tool_name, fallback_path=None):
-    try:
-        subprocess.run([tool_name, "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return True
-    except FileNotFoundError:
-        if fallback_path and Path(fallback_path).exists():
-            try:
-                subprocess.run([str(fallback_path), "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return True
-            except Exception:
-                return False
-        return False
-
-def show_progress(block_num, block_size, total_size):
-    downloaded = block_num * block_size
-    percent = min(100, downloaded * 100 / total_size) if total_size > 0 else 0
-    print(f"\rDownloading... {percent:.2f}% complete", end="")
-
-def download_and_extract_ffmpeg():
-    need_download = True
-
-    if FFMPEG_ZIP.exists():
-        print("Found existing ffmpeg.zip — checking integrity...")
-        try:
-            with zipfile.ZipFile(FFMPEG_ZIP, 'r') as test_zip:
-                bad_file = test_zip.testzip()
-                if bad_file:
-                    raise zipfile.BadZipFile(f"Corrupt file inside zip: {bad_file}")
-            print("Zip file is valid. Skipping download.")
-            need_download = False
-        except zipfile.BadZipFile:
-            print("Zip file is corrupted. Deleting and re-downloading...")
-            FFMPEG_ZIP.unlink()
-            need_download = True
-
-    if need_download:
-        print("Downloading FFmpeg...")
-        urllib.request.urlretrieve(FFMPEG_URL, FFMPEG_ZIP, reporthook=show_progress)
-        print("\nDownload complete.")
-
-        print("Extracting FFmpeg...")
-        if FFMPEG_DIR.exists():
-            print("Removing old FFmpeg folder...")
-            shutil.rmtree(FFMPEG_DIR)
-
-        with zipfile.ZipFile(FFMPEG_ZIP, 'r') as zip_ref:
-            zip_ref.extractall(FFMPEG_DIR)
-
-        print("FFmpeg extraction complete.")
-
-    # This block always runs, to ensure the binaries are in place (even if we skipped re-download)
-    for root, dirs, files in os.walk(FFMPEG_DIR):
-        root_path = Path(root)
-        if "ffmpeg.exe" in files:
-            ffmpeg_path = root_path / "ffmpeg.exe"
-            if ffmpeg_path != FFMPEG_BIN:
-                shutil.copy(ffmpeg_path, FFMPEG_BIN)
-        if "ffprobe.exe" in files:
-            ffprobe_path = root_path / "ffprobe.exe"
-            if ffprobe_path != FFPROBE_BIN:
-                shutil.copy(ffprobe_path, FFPROBE_BIN)
-
-    print(f"FFmpeg and ffprobe installed in: {FFMPEG_DIR}")
-
-def is_in_system_path(path_to_check):
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ) as key:
-            current_path, _ = winreg.QueryValueEx(key, "Path")
-            return path_to_check.lower() in current_path.lower()
-    except Exception:
-        return False
-
-def add_to_system_path(path_to_add):
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_ALL_ACCESS) as key:
-            current_path, _ = winreg.QueryValueEx(key, "Path")
-            if path_to_add not in current_path:
-                new_path = current_path + ";" + path_to_add
-                winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, new_path)
-                print(f"Added to system PATH: {path_to_add}")
-                print("You may need to restart your terminal or log out/in to apply changes.")
-            else:
-                print("FFmpeg path is already in system PATH.")
-    except Exception as e:
-        print(f"Failed to update system PATH: {e}")
 
 def format_timestamp(seconds):
     h = int(seconds // 3600)
@@ -163,69 +74,6 @@ def format_timestamp(seconds):
     s = int(seconds % 60)
     return f"{h:02}:{m:02}:{s:02}"
         
-def is_path_in_env(path_to_check):
-    """Checks if a path or its parents are in the current session PATH (fuzzy match)."""
-    check = str(Path(path_to_check).resolve()).lower()
-    env_paths = [str(Path(p).resolve()).lower() for p in os.environ["PATH"].split(os.pathsep) if p.strip()]
-    return any(check in p or p in check for p in env_paths)
-
-def ensure_ffmpeg_installed():
-    try:
-        print("Checking for ffmpeg and ffprobe...")
-
-        # 1. Check if ffmpeg is already available globally
-        ffmpeg_ok = is_tool_available("ffmpeg")
-        ffprobe_ok = is_tool_available("ffprobe")
-
-        if ffmpeg_ok and ffprobe_ok:
-            print("ffmpeg and ffprobe are already available globally.")
-            return
-
-        # 2. Check fallback path (our custom FFmpeg_DIR)
-        fallback_found = is_tool_available(str(FFMPEG_BIN)) and is_tool_available(str(FFPROBE_BIN))
-        if fallback_found:
-            print("ffmpeg found via fallback location.")
-        else:
-            print("ffmpeg not found. Installing FFmpeg...")
-            download_and_extract_ffmpeg()
-
-        # 3. Add to current session PATH if not already present
-        ffmpeg_dir_str = str(FFMPEG_DIR)
-        print(f"Checking if FFMPEG_DIR is in current session PATH: {ffmpeg_dir_str}")
-        if not is_path_in_env(ffmpeg_dir_str):
-            os.environ["PATH"] += os.pathsep + ffmpeg_dir_str
-            print("Temporarily added FFmpeg to current session PATH.")
-        else:
-            print("FFmpeg already in current session PATH.")
-
-        # 4. Add to system/user PATH via registry if not already there
-        if not is_in_system_path(ffmpeg_dir_str):
-            print("FFmpeg not found in user system PATH, adding it...")
-            add_to_system_path(ffmpeg_dir_str)
-        else:
-            print("FFmpeg already in user system PATH (registry).")
-
-        # 5. Recheck after setup
-        ffmpeg_ok = is_tool_available("ffmpeg", fallback_path=FFMPEG_BIN)
-        ffprobe_ok = is_tool_available("ffprobe", fallback_path=FFPROBE_BIN)
-
-        print(f"\nffmpeg: {'found' if ffmpeg_ok else 'not found'}")
-        print(f"ffprobe: {'found' if ffprobe_ok else 'not found'}")
-
-        if not ffmpeg_ok:
-            print(f"You can use ffmpeg directly from: {FFMPEG_BIN}")
-        if not ffprobe_ok:
-            print(f"You can use ffprobe directly from: {FFPROBE_BIN}")
-
-        if ffmpeg_ok and ffprobe_ok:
-            print("\nFFmpeg and ffprobe are ready to use.")
-        else:
-            print("\nOne or both tools are still unavailable from the command line.")
-            print("Try restarting your terminal or system for changes to take effect.")
-
-    except Exception as e:
-        print(f"\nError occurred: {e}")
-
 class ToolTip(object):
     def __init__(self, widget, text='widget info'):
         self.widget = widget
@@ -536,3 +384,187 @@ def extract_base_names(folder):
     print("🔍 Detected base names in folder:")
     for name in sorted(base_names):
         print(f" - {name}")
+
+def center_window(window, parent=None, offset_y=0):
+    """
+    Center a window on screen or relative to parent window.
+    
+    Args:
+        window: The window to center (Tk or Toplevel)
+        parent: Optional parent window to center on (if None, centers on screen)
+        offset_y: Optional vertical offset from center (positive = down)
+    """
+    window.update_idletasks()  # Ensure geometry information is up to date
+    
+    if parent:
+        # Center relative to parent
+        parent_x = parent.winfo_rootx()
+        parent_y = parent.winfo_rooty()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+        
+        window_width = window.winfo_width()
+        window_height = window.winfo_height()
+        
+        # Calculate position
+        x = parent_x + (parent_width - window_width) // 2
+        y = parent_y + (parent_height - window_height) // 2 + offset_y
+    else:
+        # Center on screen
+        screen_width = window.winfo_screenwidth()
+        screen_height = window.winfo_screenheight()
+        
+        window_width = window.winfo_width()
+        window_height = window.winfo_height()
+        
+        # Calculate position
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2 + offset_y
+    
+    # Set window position
+    window.geometry(f"+{x}+{y}")
+
+def diagnose_file_locks(file_path):
+    """Check if a file is locked and try to identify processes holding locks"""
+    import os
+    import subprocess
+    import tempfile
+    
+    # Create a diagnostic log file
+    log_path = os.path.join(tempfile.gettempdir(), "file_lock_diagnosis.txt")
+    
+    try:
+        with open(log_path, "w") as f:
+            f.write(f"File lock diagnosis for: {file_path}\n")
+            f.write(f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            
+            # Check if file exists
+            f.write(f"File exists: {os.path.exists(file_path)}\n")
+            
+            # Try to open the file for writing
+            try:
+                with open(file_path, "a+b") as test_f:
+                    f.write("File can be opened for writing\n")
+            except Exception as e:
+                f.write(f"File cannot be opened for writing: {e}\n")
+            
+            # On Windows, use handle.exe or OpenedFilesView if available
+            if os.name == 'nt':
+                f.write("\nAttempting to identify processes with open handles...\n")
+                
+                # Try Process Explorer output (if available)
+                try:
+                    result = subprocess.run(
+                        ['handle', file_path], 
+                        capture_output=True, 
+                        text=True,
+                        timeout=5
+                    )
+                    f.write("Handle.exe output:\n")
+                    f.write(result.stdout)
+                    f.write(result.stderr)
+                except:
+                    f.write("Handle.exe not available or failed\n")
+                
+                # List running processes that might be relevant
+                f.write("\nRunning processes that might be relevant:\n")
+                try:
+                    result = subprocess.run(
+                        ['tasklist', '/FI', f'IMAGENAME eq {os.path.basename(file_path)}'], 
+                        capture_output=True, 
+                        text=True,
+                        timeout=5
+                    )
+                    f.write(result.stdout)
+                except:
+                    f.write("Failed to list processes\n")
+        
+        return log_path
+    except Exception as e:
+        logging.error(f"Error in file lock diagnosis: {e}")
+        return None
+
+def create_update_diagnostic_report(update_file, target_file):
+    """Create a comprehensive diagnostic report for update issues"""
+    import os
+    import sys
+    import platform
+    import time
+    import tempfile
+    
+    report_path = os.path.join(tempfile.gettempdir(), "update_diagnostic.txt")
+    
+    try:
+        with open(report_path, "w") as f:
+            f.write("=== MP4 Looper Update Diagnostic Report ===\n")
+            f.write(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            
+            # System information
+            f.write("=== System Information ===\n")
+            f.write(f"OS: {platform.system()} {platform.version()} {platform.architecture()[0]}\n")
+            f.write(f"Python: {sys.version}\n")
+            f.write(f"Executable: {sys.executable}\n")
+            f.write(f"Working directory: {os.getcwd()}\n\n")
+            
+            # Update file information
+            f.write("=== Update File Information ===\n")
+            f.write(f"Update file: {update_file}\n")
+            if os.path.exists(update_file):
+                f.write(f"  Size: {os.path.getsize(update_file)} bytes\n")
+                f.write(f"  Last modified: {time.ctime(os.path.getmtime(update_file))}\n")
+                f.write(f"  Readable: {os.access(update_file, os.R_OK)}\n")
+                f.write(f"  Writable: {os.access(update_file, os.W_OK)}\n")
+            else:
+                f.write("  File does not exist!\n")
+            f.write("\n")
+            
+            # Target file information
+            f.write("=== Target File Information ===\n")
+            f.write(f"Target file: {target_file}\n")
+            if os.path.exists(target_file):
+                f.write(f"  Size: {os.path.getsize(target_file)} bytes\n")
+                f.write(f"  Last modified: {time.ctime(os.path.getmtime(target_file))}\n")
+                f.write(f"  Readable: {os.access(target_file, os.R_OK)}\n")
+                f.write(f"  Writable: {os.access(target_file, os.W_OK)}\n")
+                
+                # Try to determine if file is locked
+                f.write("  Checking if file is locked...\n")
+                try:
+                    with open(target_file, "a+b") as test_f:
+                        f.write("  File is not locked for writing\n")
+                except Exception as e:
+                    f.write(f"  File appears to be locked: {e}\n")
+            else:
+                f.write("  File does not exist!\n")
+        
+        return report_path
+    except Exception as e:
+        logging.error(f"Error creating diagnostic report: {e}")
+        return None
+    
+def is_running_in_debug_mode():
+    """Check if we're running in debug/development mode"""
+    return 'debugpy' in sys.modules or any('debug' in arg.lower() for arg in sys.argv)
+
+def check_environment_vars():
+    """Check and log important environment variables"""
+    env_vars = {
+        "REGGAE_SHEET_URL": os.getenv("REGGAE_SHEET_URL"),
+        "GOSPEL_SHEET_URL": os.getenv("GOSPEL_SHEET_URL"),
+        "GOOGLE_DRIVE_ROOT_FOLDER_ID": os.getenv("GOOGLE_DRIVE_ROOT_FOLDER_ID"),
+        "GOOGLE_SPREADSHEET_ID": os.getenv("GOOGLE_SPREADSHEET_ID"),
+        "GITHUB_REPO_OWNER": os.getenv("GITHUB_REPO_OWNER"),
+        "GITHUB_REPO_NAME": os.getenv("GITHUB_REPO_NAME")
+    }
+    
+    missing = [key for key, value in env_vars.items() if not value]
+    if missing:
+        logging.warning(f"⚠️ Missing environment variables: {', '.join(missing)}")
+    
+    for key, value in env_vars.items():
+        if value:
+            # Mask long values for cleaner logs
+            masked_value = value[:10] + "..." + value[-5:] if len(value) > 20 else value
+            logging.debug(f"✅ Environment variable {key}={masked_value}")
+    
+    return env_vars

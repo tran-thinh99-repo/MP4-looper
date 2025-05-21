@@ -52,3 +52,6 @@ ffmpeg/
 
 # Bat files
 git_init.bat
+
+# Environment variables
+.env

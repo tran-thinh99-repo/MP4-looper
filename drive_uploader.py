@@ -8,13 +8,12 @@ Google Drive Uploader Module - Direct integration for the MP4 batch processor
 import os
 import re
 import sys
-import json
 import time
 import logging
 import threading
-from pathlib import Path
 from queue import Queue
-from datetime import datetime
+
+from config import GOOGLE_DRIVE_ROOT_FOLDER_ID, GOOGLE_SPREADSHEET_ID, GOOGLE_SPREADSHEET_NAME
 
 # Google API imports
 from google.oauth2 import service_account
@@ -34,7 +33,6 @@ COLUMN_MAP = {
 
 # First data row in the sheet (rows before this are headers)
 FIRST_DATA_ROW = 5  # Start at row 5 (skipping rows 1-4)
-
 class DriveUploader:
     """Handles Google Drive uploads directly in the application"""
     
@@ -42,9 +40,9 @@ class DriveUploader:
                  spreadsheet_id=None, sheet_name=None):
         # Configuration
         self.service_account_path = service_account_path or "credentials.json"
-        self.root_folder_id = root_folder_id or "1XPtNN0hSo_fpH7FY7dTcDV0TqThTmJXY"
-        self.spreadsheet_id = spreadsheet_id or "107JwSxtewrJX4T0o6sfelsV53nc3a5N3sh3wP3sK0E8"
-        self.sheet_name = sheet_name or "REGGAE"
+        self.root_folder_id = root_folder_id or GOOGLE_DRIVE_ROOT_FOLDER_ID
+        self.spreadsheet_id = spreadsheet_id or GOOGLE_SPREADSHEET_ID
+        self.sheet_name = sheet_name or GOOGLE_SPREADSHEET_NAME
         
         # State variables
         self.is_uploading = False

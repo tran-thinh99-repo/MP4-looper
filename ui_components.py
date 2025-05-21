@@ -9,8 +9,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from tkinterdnd2 import TkinterDnD, DND_FILES
 
-# Import the help window
 from help_window import HelpWindow
+from utils import center_window
 
 # Configure UI Theme
 ctk.set_appearance_mode("dark")
@@ -42,7 +42,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
         self.create_ui()
         
         # Center window on screen
-        self.after(100, self.center_window)
+        self.after(100, lambda: center_window(self))
         
         # Set up close protocol
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -740,6 +740,8 @@ class BatchProcessorUI(TkinterDnD.Tk):
             self.controller.save_setting("sheet_preset", selected)
             self.controller.save_setting("sheet_url", url)
             logging.info(f"Applied preset '{selected}' with URL: {url}")
+        else:
+            logging.warning(f"No URL found for preset '{selected}'")
 
     def show_debug_log(self):
         """Show the debug log file"""
@@ -993,31 +995,6 @@ class BatchProcessorUI(TkinterDnD.Tk):
             "fade_audio": self.fade_audio_var.get(),
             "export_timestamp": self.export_timestamp_var.get(),
         }
-
-    def center_window(self):
-        """Center the window on the screen with higher vertical position"""
-        self.update_idletasks()
-        
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        window_width = self.winfo_width()
-        window_height = self.winfo_height()
-        
-        # Calculate the horizontal center
-        x = (screen_width // 2) - (window_width // 2)
-        
-        # Position the window a bit higher than the exact center (30% from top instead of 50%)
-        y = int(screen_height * 0.3) - (window_height // 2)
-        
-        # Ensure minimum top padding
-        y = max(y, 40)
-        
-        # Ensure there's enough space at the bottom for the taskbar and a bit more
-        bottom_margin = 100  # Increased margin for taskbar plus additional space
-        max_y = screen_height - window_height - bottom_margin
-        y = min(y, max_y)
-        
-        self.geometry(f"+{x}+{y}")
 
     def on_close(self):
         """Handle window close event"""

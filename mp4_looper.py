@@ -3,26 +3,55 @@ import subprocess
 import logging
 import psutil
 import re
+import customtkinter as ctk
 from pathlib import Path
 from tkinter import messagebox
+from dotenv import load_dotenv
 
 # Import modules from existing application
-from utils import (setup_logging, disable_cmd_edit_mode,
+from utils import (setup_logging, disable_cmd_edit_mode, check_environment_vars,
                   open_folder, check_canceled_upload_folder_status)
 from song_utils import generate_song_list_from_google_sheet
 from post_render_check import validate_render
-from config import SETTINGS_FILE, SHEET_PRESETS
+from config import SETTINGS_FILE, GITHUB_REPO_NAME, GITHUB_REPO_OWNER
 from ui_components import BatchProcessorUI
 from dependency_checker import main as check_dependencies
 from paths import get_resource_path, get_base_path, clean_folder_with_confirmation
+from update_module.update_checker import UpdateChecker
 
 class MP4LooperApp:
     def __init__(self):
-        self.ui = BatchProcessorUI(self)
-        self.ui.title("MP4 Looper")  # Call on ui, not self
-        icon_path = get_resource_path("mp4_looper_icon.ico")
-        self.ui.iconbitmap(default=icon_path)  # Call on ui, not self
         setup_logging()
+        load_dotenv()
+
+        # Check environment variables and log their status
+        check_environment_vars()
+        
+        # Application settings
+        self.app_name = "MP4 Looper"
+        self.version = "1.1.0"  # Production version
+
+        # Load sheet presets from environment variables
+        self.sheet_presets = {
+            "Reggae": os.getenv("REGGAE_SHEET_URL", ""),
+            "Gospel": os.getenv("GOSPEL_SHEET_URL", "")
+        }
+        
+        # Initialize UI and other components
+        self.ui = BatchProcessorUI(self)
+        self.ui.title(f"{self.app_name} v{self.version}")
+
+        # One-line update check that will be shown after UI loads
+        self.ui.after(1000, lambda: UpdateChecker(
+            self.app_name, 
+            self.version, 
+            GITHUB_REPO_OWNER, 
+            GITHUB_REPO_NAME, 
+        ).check_and_notify(self.ui))
+
+        icon_path = get_resource_path("mp4_looper_icon.ico")
+        self.ui.iconbitmap(default=icon_path)
+
         disable_cmd_edit_mode()
         check_dependencies()
 
@@ -75,12 +104,31 @@ class MP4LooperApp:
         self.save_settings()
 
     def get_sheet_presets(self):
-        """Get available sheet presets"""
-        return list(SHEET_PRESETS.keys())
+        """Return available sheet preset names for dropdown"""
+        # Return list of preset keys (names) or a default value if empty
+        if self.sheet_presets:
+            return list(self.sheet_presets.keys())
+        return ["No Presets"]
     
+    # When initializing the sheet dropdown in the UI
+    def init_sheet_dropdown(self):
+        # The controller is available as self.controller in your UI class
+        presets = self.controller.get_sheet_presets()
+        
+        self.sheet_dropdown = ctk.CTkOptionMenu(
+            self.sheet_row,
+            values=presets,
+            command=self.apply_preset_sheet_url,
+            width=100
+        )
+        
+        # Select first item by default if available
+        if presets:
+            self.sheet_dropdown.set(presets[0])
+
     def get_sheet_preset_url(self, preset_name):
         """Get URL for a sheet preset"""
-        return SHEET_PRESETS.get(preset_name, "")
+        return self.sheet_presets.get(preset_name, "")
 
     def open_folder(self, path, label="Folder", parent=None):
         """Open a folder in file explorer"""
@@ -104,9 +152,7 @@ class MP4LooperApp:
     
     def clean_canceled_uploads(self, parent=None):
         """Clean canceled uploads from Google Drive"""
-        import getpass
-        username = getpass.getuser()
-        path = Path(f"C:/Users/{username}/AppData/Local/Google/DriveFS/canceled_uploads")
+        path = Path(os.path.join(os.environ["LOCALAPPDATA"], "Google", "DriveFS", "canceled_uploads"))
         clean_folder_with_confirmation(path, "Clean Canceled Uploads", parent)
 
     def process_dropped_files(self, file_paths):
