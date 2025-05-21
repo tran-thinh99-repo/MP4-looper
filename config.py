@@ -10,7 +10,7 @@ load_dotenv()
 BASE_DIR = Path.cwd()
 FFMPEG_DIR = BASE_DIR / "ffmpeg"  # <-- Keep as Path object
 SETTINGS_FILE = "looper_settings.json"
-SCOPES = ['https://www.googleapis.com/auth/drive']
+SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets.readonly']
 SERVICE_ACCOUNT_PATH = get_resource_path("credentials.json")
 FOLDER_ID_MAP_PATH = os.path.join(get_base_path(), "folder_id_map.json")
 UPLOADER_WORKER_PATH = os.path.join(get_base_path(), "uploader_worker.py")

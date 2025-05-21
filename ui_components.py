@@ -73,10 +73,13 @@ class BatchProcessorUI(TkinterDnD.Tk):
                                     text_color="#aaa", font=("Segoe UI", 12))
         self.count_label.pack(side="right")
         
-        # Create the drop area with darker background 
-        self.drop_area = ctk.CTkFrame(main_container, fg_color="#1e1e1e", corner_radius=10)
+        # Create the drop area with darker background - INCREASE MINIMUM HEIGHT
+        self.drop_area = ctk.CTkFrame(main_container, fg_color="#1e1e1e", corner_radius=10, height=300)
         self.drop_area.grid(row=r, column=0, sticky="nsew", pady=(0, 10), padx=5)
         main_container.grid_rowconfigure(r, weight=1)  # Make this row expandable
+        
+        # Add minimum size constraint 
+        self.drop_area.grid_propagate(False)  # Prevent from shrinking below specified size
         r += 1
         
         # Split the drop area into two columns
@@ -86,9 +89,10 @@ class BatchProcessorUI(TkinterDnD.Tk):
         drop_area_content.grid_columnconfigure(1, weight=1)
         drop_area_content.grid_rowconfigure(0, weight=1)
         
-        # Left side - File queue
-        drop_zone_left = ctk.CTkFrame(drop_area_content, fg_color="#232323", corner_radius=8)
+        # Left side - File queue - INCREASE MINIMUM HEIGHT
+        drop_zone_left = ctk.CTkFrame(drop_area_content, fg_color="#232323", corner_radius=8, height=250)
         drop_zone_left.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        drop_zone_left.grid_propagate(False)  # Prevent from shrinking
         
         # Header for raw preview
         raw_header = ctk.CTkLabel(
@@ -99,17 +103,33 @@ class BatchProcessorUI(TkinterDnD.Tk):
         )
         raw_header.pack(pady=(10, 5))
 
-        drop_zone_left.pack_propagate(False)
-
-        # Add drop indicator (will be hidden when files are added)
+        # Add drop indicator with reduced height and better positioning
         self.drop_indicator = ctk.CTkLabel(drop_zone_left, text="🡇 Drag video files or folders here 🡇",
                                     fg_color="transparent", text_color="#00bfff",
-                                    font=("Segoe UI", 16, "bold"), height=100)
-        self.drop_indicator.place(relx=0.5, rely=0.5, anchor="center")
+                                    font=("Segoe UI", 16, "bold"), height=60)  # Reduced height
+        self.drop_indicator.pack(expand=True, fill="both", pady=20)  # Use pack instead of place
         
-        # Create a scrollable frame for showing added files
-        self.folder_frame = ctk.CTkScrollableFrame(drop_zone_left, fg_color="transparent")
-        self.folder_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # Create a scrollable frame for showing added files with explicit size
+        self.folder_frame = ctk.CTkScrollableFrame(drop_zone_left, fg_color="transparent", height=180)
+        self.folder_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # Right side - Output preview - INCREASE MINIMUM HEIGHT
+        drop_zone_right = ctk.CTkFrame(drop_area_content, fg_color="#232323", corner_radius=8, height=250)
+        drop_zone_right.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        drop_zone_right.grid_propagate(False)  # Prevent from shrinking
+
+        # Header for output preview
+        output_header = ctk.CTkLabel(
+            drop_zone_right, 
+            text="Output Preview", 
+            text_color="#00bfff",
+            font=("Segoe UI", 14, "bold")
+        )
+        output_header.pack(pady=(10, 5))
+        
+        # Create a scrollable frame for showing output file names with explicit size
+        self.output_preview_frame = ctk.CTkScrollableFrame(drop_zone_right, fg_color="transparent", height=180)
+        self.output_preview_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         # Register the drop zone and indicator for drag and drop
         drop_zone_left.drop_target_register(DND_FILES)
@@ -1051,11 +1071,13 @@ class BatchProcessorUI(TkinterDnD.Tk):
         
         # If no files, show the drop indicator
         if not self.file_paths:
-            self.drop_indicator.place(relx=0.5, rely=0.5, anchor="center")
+            # Use pack to show the drop indicator instead of place
+            self.drop_indicator.pack(expand=True, fill="both", pady=20)
             self.remove_selected_button.configure(state="disabled")
             return
         else:
-            self.drop_indicator.place_forget()
+            # Hide the drop indicator using pack_forget instead of place_forget
+            self.drop_indicator.pack_forget()
         
         # Get the current duration for output file naming
         duration = 600  # Default to 600s (10m)

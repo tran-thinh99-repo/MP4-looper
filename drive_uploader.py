@@ -13,7 +13,7 @@ import logging
 import threading
 from queue import Queue
 
-from config import GOOGLE_DRIVE_ROOT_FOLDER_ID, GOOGLE_SPREADSHEET_ID, GOOGLE_SPREADSHEET_NAME
+from config import GOOGLE_DRIVE_ROOT_FOLDER_ID, GOOGLE_SPREADSHEET_ID, GOOGLE_SPREADSHEET_NAME, SCOPES
 
 # Google API imports
 from google.oauth2 import service_account
@@ -76,9 +76,8 @@ class DriveUploader:
             if not os.path.exists(self.service_account_path):
                 raise FileNotFoundError(f"Credentials file not found: {self.service_account_path}")
                 
-            scopes = ["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/spreadsheets"]
             credentials = service_account.Credentials.from_service_account_file(
-                self.service_account_path, scopes=scopes)
+                self.service_account_path, SCOPES=SCOPES)
             
             # Initialize services
             self.drive_service = build('drive', 'v3', credentials=credentials)

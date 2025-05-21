@@ -1,5 +1,4 @@
 import os
-import csv
 import logging
 import requests
 import random
@@ -23,61 +22,111 @@ def generate_song_list_from_google_sheet(
 ):
     logging.debug(f"🧪 generate_song_list_from_google_sheet() called")
     try:
-        # Use direct Google Sheet access
-        logging.info(f"📊 Reading directly from Google Sheet: {sheet_url}")
-        try:
-            response = requests.get(sheet_url, timeout=10)
-            response.raise_for_status()
-            
-            # Parse CSV directly from the response content
-            csv_content = response.text.splitlines()
-            reader = csv.reader(csv_content)
-            header = next(reader, None)  # skip header
-            
-            songs_raw = []
-            weeks_raw = []
-            last_week = ""
-            
-            for row in reader:
-                # Parse song and week information
-                if len(row) >= 2:
-                    a = row[0].strip()
-                    b = row[1].strip()
-                    if a.isdigit() and b:
-                        song = f"{a}_{b}"
-                    else:
-                        song = ""
-                else:
-                    song = ""
-
-                week = row[4].strip() if len(row) > 4 else ""
-
-                # Fill down the last known week if current is empty
-                if not week and last_week:
-                    week = last_week
-                elif week:
-                    last_week = week
-
-                logging.debug(f"Parsed row (by index) - Week: '{week}', Song: '{song}'")
-                # Filter to avoid garbage songs
-                if (
-                    song and
-                    "_" in song and
-                    song.split("_")[0].isdigit()
-                ):
-                    if len(songs_raw) < 5:  # Log first 5 only
-                        logging.debug(f"✅ RAW SONG STRING: {repr(song)}")
-                    songs_raw.append(song)
-                    weeks_raw.append(week)
-                else:
-                    logging.debug(f"⏭️ Skipped invalid parsed song: '{song}'")
-            
-            logging.info(f"✅ Directly read {len(songs_raw)} songs from Google Sheet")
-            
-        except Exception as e:
-            logging.error(f"❌ Failed to read directly from Google Sheet: {e}")
+        # Use Google Sheets API instead of direct HTTP request
+        logging.info(f"📊 Reading from Google Sheet URL: {sheet_url}")
+        
+        # Extract sheet ID from URL
+        import re  # Add this line to import re directly in the function if needed
+        sheet_id_match = re.search(r'/d/([a-zA-Z0-9_-]+)', sheet_url)
+        if not sheet_id_match:
+            logging.error(f"Invalid sheet URL format: {sheet_url}")
             return None
             
+        sheet_id = sheet_id_match.group(1)
+        
+        # Extract gid from URL parameters or fragment
+        gid_match = re.search(r'gid=(\d+)', sheet_url)
+        gid = gid_match.group(1) if gid_match else "0"
+        
+        logging.info(f"📊 Reading from Google Sheet ID: {sheet_id}, Sheet gid: {gid}")
+        
+        # Use the existing credentials from your config
+        from config import SERVICE_ACCOUNT_PATH, SCOPES
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        
+        # Create credentials
+        credentials = service_account.Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_PATH, scopes=SCOPES
+        )
+        
+        # Create the Sheets service
+        sheets_service = build('sheets', 'v4', credentials=credentials)
+        
+        # First, get the sheet information to find the sheet name for the specified gid
+        spreadsheet_info = sheets_service.spreadsheets().get(
+            spreadsheetId=sheet_id
+        ).execute()
+        
+        # Find the sheet name that corresponds to the gid
+        sheet_name = None
+        for sheet in spreadsheet_info.get('sheets', []):
+            if str(sheet.get('properties', {}).get('sheetId', '')) == gid:
+                sheet_name = sheet.get('properties', {}).get('title')
+                break
+        
+        if not sheet_name:
+            logging.error(f"Could not find sheet with gid={gid} in the spreadsheet")
+            return None
+            
+        logging.info(f"✅ Found sheet name: {sheet_name} for gid {gid}")
+        
+        # Now get the data from the specific sheet
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=sheet_id,
+            range=f"'{sheet_name}'!A:E"  # Specify the sheet name and columns
+        ).execute()
+        
+        rows = result.get('values', [])
+        if not rows:
+            logging.error("No data found in sheet")
+            return None
+            
+        # Process the rows to get song data
+        songs_raw = []
+        weeks_raw = []
+        last_week = ""
+        
+        # Skip header row
+        for row in rows[1:]:
+            # Ensure row has enough columns
+            if len(row) < 2:
+                continue
+                
+            # Parse song and week information
+            a = row[0].strip() if len(row) > 0 else ""
+            b = row[1].strip() if len(row) > 1 else ""
+            
+            if a.isdigit() and b:
+                song = f"{a}_{b}"
+            else:
+                song = ""
+
+            week = row[4].strip() if len(row) > 4 else ""
+
+            # Fill down the last known week if current is empty
+            if not week and last_week:
+                week = last_week
+            elif week:
+                last_week = week
+
+            logging.debug(f"Parsed row (by index) - Week: '{week}', Song: '{song}'")
+            
+            # Filter to avoid garbage songs
+            if (
+                song and
+                "_" in song and
+                song.split("_")[0].isdigit()
+            ):
+                if len(songs_raw) < 5:  # Log first 5 only
+                    logging.debug(f"✅ RAW SONG STRING: {repr(song)}")
+                songs_raw.append(song)
+                weeks_raw.append(week)
+            else:
+                logging.debug(f"⏭️ Skipped invalid parsed song: '{song}'")
+            
+        logging.info(f"✅ Successfully read {len(songs_raw)} songs from Google Sheet")
+        
         if not weeks_raw or not songs_raw:
             logging.error("No valid data available to generate song list.")
             return None
