@@ -19,40 +19,60 @@ from utils import is_running_in_debug_mode
 
 def find_executable(name):
     """Find an executable, prioritizing bundled versions with the application"""
-    # First check the directory where the script is located
-    app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    
-    # Check if running from VSCode debugger
-    debug_mode = is_running_in_debug_mode()
-    if debug_mode:
-        logging.debug("Running in debug mode - will also check development paths")
-    
-    # List of possible locations to check - prioritize bundled locations
     exe_name = f"{name}.exe" if sys.platform == "win32" else name
-    locations = [
-        # Bundled with application (highest priority)
+    
+    # HIGHEST PRIORITY: Check if running from PyInstaller bundle
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # When running as PyInstaller onefile, binaries are in _MEIPASS
+        meipass_path = os.path.join(sys._MEIPASS, exe_name)
+        logging.debug(f"Checking for {name} in PyInstaller temp dir: {meipass_path}")
+        if os.path.isfile(meipass_path) and os.access(meipass_path, os.X_OK):
+            logging.info(f"Found {name} in PyInstaller temp dir: {meipass_path}")
+            return meipass_path
+    
+    # SECOND PRIORITY: Check in development bundled locations
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable
+        app_dir = os.path.dirname(sys.executable)
+    else:
+        # Running as script
+        app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    
+    logging.debug(f"Application directory: {app_dir}")
+    
+    # Check in application directory and subdirectories
+    bundled_locations = [
         os.path.join(app_dir, exe_name),
         os.path.join(app_dir, "ffmpeg", exe_name),
         os.path.join(app_dir, "bin", exe_name),
     ]
     
-    # Debug-specific paths
+    # For development, also check relative paths
+    debug_mode = is_running_in_debug_mode()
     if debug_mode:
-        # Add VSCode debug paths
-        vscode_paths = [
-            # Common development paths
-            os.path.abspath(os.path.join(app_dir, "..", "ffmpeg", exe_name)),
-            os.path.abspath(os.path.join(app_dir, "..", "..", "ffmpeg", exe_name)),
-        ]
-        locations.extend(vscode_paths)
+        # Add paths relative to your development structure
+        parent_dir = os.path.abspath(os.path.join(app_dir, ".."))
+        bundled_locations.extend([
+            os.path.join(parent_dir, "ffmpeg", exe_name),
+            os.path.join(app_dir, "..", "ffmpeg", exe_name),
+        ])
     
-    # Check specific locations first
-    for location in locations:
+    # Check bundled locations BEFORE checking PATH
+    for location in bundled_locations:
+        logging.debug(f"Checking for {name} at: {location}")
         if os.path.isfile(location) and os.access(location, os.X_OK):
+            logging.info(f"Found bundled {name} at: {location}")
             return location
     
-    # Fall back to PATH if bundled version not found
-    return shutil.which(name)
+    # LAST RESORT: Fall back to PATH (system installed versions)
+    path_exe = shutil.which(name)
+    if path_exe:
+        logging.warning(f"Using system {name} from PATH (bundled version not found): {path_exe}")
+        return path_exe
+    
+    # Not found anywhere
+    logging.error(f"{name} not found in any location")
+    return None
 
 def check_ffmpeg_availability():
     """Check if FFmpeg and FFprobe are available"""
@@ -152,12 +172,18 @@ def check_ffmpeg_availability():
 def run_command(cmd):
     """Run a command and return its output"""
     try:
+        # Use subprocess.CREATE_NO_WINDOW flag on Windows to prevent command window flashing
+        extra_args = {}
+        if sys.platform == "win32":
+            extra_args["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+        
         result = subprocess.run(
             cmd, 
             stdout=subprocess.PIPE, 
             stderr=subprocess.PIPE, 
             text=True, 
-            timeout=10
+            timeout=10,
+            **extra_args
         )
         return {
             "success": result.returncode == 0,

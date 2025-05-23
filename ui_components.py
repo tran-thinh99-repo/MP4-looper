@@ -10,7 +10,9 @@ from tkinter import filedialog, messagebox, ttk
 from tkinterdnd2 import TkinterDnD, DND_FILES
 
 from help_window import HelpWindow
-from utils import center_window
+from utils import center_window, format_duration
+
+from settings_manager import get_settings
 
 # Configure UI Theme
 ctk.set_appearance_mode("dark")
@@ -26,6 +28,9 @@ class BatchProcessorUI(TkinterDnD.Tk):
         # Reference to the main application controller
         self.controller = app_controller
         
+        # Get settings manager reference
+        self.settings_manager = get_settings()
+        
         # UI state variables
         self.file_paths = []
         self.rendering = False
@@ -35,17 +40,57 @@ class BatchProcessorUI(TkinterDnD.Tk):
         self.output_preview_labels = []
         self.selected_file = None
         
-        # Initialize duration display variable that was missing
-        self.duration_display_var = tk.StringVar(value="(1h)")
+        # Initialize duration display variable
+        default_duration = self.settings_manager.get("ui.loop_duration", "3600")
+        self.duration_display_var = tk.StringVar(value=self._format_duration_display(int(default_duration)))
         
         # Create and lay out the UI components
         self.create_ui()
+        
+        # Apply window settings
+        self.apply_window_settings()
         
         # Center window on screen
         self.after(100, lambda: center_window(self))
         
         # Set up close protocol
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def apply_window_settings(self):
+        """Apply saved window settings"""
+        try:
+            # Apply saved geometry
+            saved_geometry = self.settings_manager.get("ui.window_geometry")
+            if saved_geometry and isinstance(saved_geometry, str):
+                self.geometry(saved_geometry)
+            
+            # Apply saved position (after a short delay to ensure window is ready)
+            saved_position = self.settings_manager.get("ui.window_position")
+            if saved_position and isinstance(saved_position, str):
+                try:
+                    x, y = map(int, saved_position.split(','))
+                    self.after(200, lambda: self.geometry(f"+{x}+{y}"))
+                except ValueError:
+                    pass  # Invalid position format
+                    
+        except Exception as e:
+            logging.debug(f"Could not apply window settings: {e}")
+
+    def _format_duration_display(self, seconds):
+        """Format seconds into readable duration"""
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        
+        display_text = ""
+        if h > 0:
+            display_text += f"{h}h "
+        if m > 0 or (h > 0 and s > 0):
+            display_text += f"{m}m "
+        if s > 0 or (h == 0 and m == 0):
+            display_text += f"{s}s"
+        
+        return f"({display_text.strip()})"
 
     def create_ui(self):
         # Main container with padding
@@ -396,15 +441,31 @@ class BatchProcessorUI(TkinterDnD.Tk):
         # Create a sub-frame to hold the buttons in a row with equal width
         buttons_frame = ctk.CTkFrame(debug_frame, fg_color="transparent")
         buttons_frame.pack(fill="x", expand=True)
-        buttons_frame.columnconfigure(0, weight=1)
-        buttons_frame.columnconfigure(1, weight=1)
-        buttons_frame.columnconfigure(2, weight=1)
+        
+        # Check if user is admin BEFORE creating the grid
+        is_admin = False
+        try:
+            is_admin = self.controller.is_admin_user()
+            logging.debug(f"Admin check result: {is_admin}")
+        except Exception as e:
+            logging.error(f"Error checking admin status: {e}")
+        
+        # Configure columns based on admin status
+        if is_admin:
+            # 5 columns for admin users
+            for i in range(5):
+                buttons_frame.columnconfigure(i, weight=1)
+        else:
+            # 4 columns for regular users
+            for i in range(4):
+                buttons_frame.columnconfigure(i, weight=1)
 
+        # Create buttons
         self.debug_button = ctk.CTkButton(
             buttons_frame,
             text="Show Debug Log",
             command=self.show_debug_log,
-            fg_color="#6c757d",  # Gray
+            fg_color="#6c757d",
             hover_color="#5a6268"
         )
         self.debug_button.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
@@ -413,20 +474,42 @@ class BatchProcessorUI(TkinterDnD.Tk):
             buttons_frame,
             text="Clean Canceled Uploads",
             command=self.clean_canceled_uploads,
-            fg_color="#6c757d",  # Gray
+            fg_color="#6c757d",
             hover_color="#5a6268"
         )
         self.clean_uploads_button.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 
-        # Add help button
+        self.send_debug_button = ctk.CTkButton(
+            buttons_frame,
+            text="📤 Send Debug Info",
+            command=self.send_debug_info,
+            fg_color="#17a2b8",
+            hover_color="#138496"
+        )
+        self.send_debug_button.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+
         self.help_button = ctk.CTkButton(
             buttons_frame,
             text="❓ Help",
             command=self.show_help,
-            fg_color="#6c757d",  # Gray
+            fg_color="#6c757d",
             hover_color="#5a6268"
         )
-        self.help_button.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+        self.help_button.grid(row=0, column=3, padx=5, pady=5, sticky="ew")
+
+        # Admin-only monitor button
+        if is_admin:
+            self.monitor_button = ctk.CTkButton(
+                buttons_frame,
+                text="📊 Monitor",
+                command=self.show_admin_monitoring,
+                fg_color="#e67e22",  # Orange color to make it stand out
+                hover_color="#d35400"
+            )
+            self.monitor_button.grid(row=0, column=4, padx=5, pady=5, sticky="ew")
+            logging.info("Admin monitoring button created and visible")
+        else:
+            logging.debug("User is not admin - monitor button not created")
         
         # Initialize the missing attribute for showing current file
         self.current_file_var = tk.StringVar(value="")
@@ -714,20 +797,22 @@ class BatchProcessorUI(TkinterDnD.Tk):
                 self.status_label.configure(text=f"📄 {file_count} files queued")
 
     def browse_output(self):
-        """Browse for output folder"""
+        """Browse for output folder - UPDATED METHOD"""
         folder = filedialog.askdirectory()
         if folder:
             self.output_entry.delete(0, tk.END)
             self.output_entry.insert(0, folder)
-            self.controller.save_setting("output_folder", folder)
+            # Save setting immediately
+            self.on_setting_changed('output_folder', folder)
 
     def browse_music(self):
-        """Browse for music folder"""
+        """Browse for music folder - UPDATED METHOD"""
         folder = filedialog.askdirectory()
         if folder:
             self.music_entry.delete(0, tk.END)
             self.music_entry.insert(0, folder)
-            self.controller.save_setting("music_folder", folder)
+            # Save setting immediately
+            self.on_setting_changed('music_folder', folder)
 
     def open_output(self):
         """Open the output folder"""
@@ -752,13 +837,16 @@ class BatchProcessorUI(TkinterDnD.Tk):
             self.new_song_count_entry.configure(state="normal")
 
     def apply_preset_sheet_url(self, selected):
-        """Apply a preset sheet URL"""
+        """Apply a preset sheet URL - UPDATED METHOD"""
         url = self.controller.get_sheet_preset_url(selected)
         if url:
             self.sheet_entry.delete(0, tk.END)
             self.sheet_entry.insert(0, url)
-            self.controller.save_setting("sheet_preset", selected)
-            self.controller.save_setting("sheet_url", url)
+            
+            # Save both preset and URL
+            self.on_setting_changed('sheet_preset', selected)
+            self.on_setting_changed('sheet_url', url)
+            
             logging.info(f"Applied preset '{selected}' with URL: {url}")
         else:
             logging.warning(f"No URL found for preset '{selected}'")
@@ -952,72 +1040,140 @@ class BatchProcessorUI(TkinterDnD.Tk):
         # Call the controller's upload method
         self.controller.upload_to_drive(output_folder, only_file)
 
-    def apply_settings(self, settings):
-        """Apply loaded settings to UI elements"""
-        if "output_folder" in settings:
-            self.output_entry.delete(0, tk.END)
-            self.output_entry.insert(0, settings["output_folder"])
-            
-        if "music_folder" in settings:
-            self.music_entry.delete(0, tk.END)
-            self.music_entry.insert(0, settings["music_folder"])
-            
-        if "sheet_url" in settings:
-            self.sheet_entry.delete(0, tk.END)
-            self.sheet_entry.insert(0, settings["sheet_url"])
-            
-        if "sheet_preset" in settings and settings["sheet_preset"] in self.controller.get_sheet_presets():
-            self.sheet_dropdown.set(settings["sheet_preset"])
-            
-        if "loop_duration" in settings:
-            self.duration_input.delete(0, tk.END)
-            self.duration_input.insert(0, settings["loop_duration"])
-            try:
-                duration = int(settings["loop_duration"])
-                self.update_duration_display(duration)
-            except ValueError:
-                # If not a valid integer, set a default
+    def apply_settings(self, settings_dict):
+        """Apply settings to UI elements - UPDATED METHOD"""
+        try:
+            # Output folder
+            if "output_folder" in settings_dict:
+                self.output_entry.delete(0, tk.END)
+                self.output_entry.insert(0, settings_dict["output_folder"])
+                
+            # Music folder
+            if "music_folder" in settings_dict:
+                self.music_entry.delete(0, tk.END)
+                self.music_entry.insert(0, settings_dict["music_folder"])
+                
+            # Duration
+            if "loop_duration" in settings_dict:
+                duration_str = str(settings_dict["loop_duration"])
                 self.duration_input.delete(0, tk.END)
-                self.duration_input.insert(0, "600")
-                self.update_duration_display(600)
+                self.duration_input.insert(0, duration_str)
+                try:
+                    duration = int(duration_str)
+                    self.update_duration_display(duration)
+                except ValueError:
+                    self.duration_input.delete(0, tk.END)
+                    self.duration_input.insert(0, "3600")
+                    self.update_duration_display(3600)
+                
+            # Google Sheet settings
+            if "sheet_url" in settings_dict:
+                self.sheet_entry.delete(0, tk.END)
+                self.sheet_entry.insert(0, settings_dict["sheet_url"])
+                
+            if "sheet_preset" in settings_dict and settings_dict["sheet_preset"] in self.controller.get_sheet_presets():
+                self.sheet_dropdown.set(settings_dict["sheet_preset"])
+                
+            # Processing settings
+            if "use_default_song_count" in settings_dict:
+                self.use_default_song_count.set(settings_dict["use_default_song_count"])
+                
+            if "default_song_count" in settings_dict:
+                self.new_song_count_var.set(str(settings_dict["default_song_count"]))
+                
+            if "fade_audio" in settings_dict:
+                self.fade_audio_var.set(settings_dict["fade_audio"])
+                
+            if "export_timestamp" in settings_dict:
+                self.export_timestamp_var.set(settings_dict["export_timestamp"])
+                
+            if "auto_upload" in settings_dict:
+                self.auto_upload_var.set(settings_dict["auto_upload"])
+                
+            # Update UI state based on settings
+            self.toggle_song_count()
             
-        if "use_default_song_count" in settings:
-            self.use_default_song_count.set(settings["use_default_song_count"])
+            logging.debug("Settings applied to UI successfully")
             
-        if "default_song_count" in settings:
-            self.new_song_count_var.set(str(settings["default_song_count"]))
-            
-        # Add auto-upload setting
-        if "auto_upload" in settings:
-            self.auto_upload_var.set(settings["auto_upload"])
-            
-        if "fade_audio" in settings:
-            self.fade_audio_var.set(settings["fade_audio"])
-            
-        if "export_timestamp" in settings:
-            self.export_timestamp_var.set(settings["export_timestamp"])
-            
-        # Update UI state based on settings
-        self.toggle_song_count()
+        except Exception as e:
+            logging.error(f"Error applying settings to UI: {e}")
 
     # 2. Modify the get_current_settings method to include auto_upload (if not already present)
     def get_current_settings(self):
-        """Get current settings from UI elements"""
-        return {
-            "output_folder": self.output_entry.get().strip(),
-            "music_folder": self.music_entry.get().strip(),
-            "sheet_url": self.sheet_entry.get().strip(),
-            "sheet_preset": self.sheet_dropdown.get(),
-            "loop_duration": self.duration_input.get(),
-            "use_default_song_count": self.use_default_song_count.get(),
-            "default_song_count": self.new_song_count_var.get(),
-            "auto_upload": self.auto_upload_var.get(),  # Add auto-upload preference
-            "fade_audio": self.fade_audio_var.get(),
-            "export_timestamp": self.export_timestamp_var.get(),
-        }
+        """Get current settings from UI elements - UPDATED METHOD"""
+        try:
+            return {
+                "output_folder": self.output_entry.get().strip(),
+                "music_folder": self.music_entry.get().strip(),
+                "loop_duration": self.duration_input.get().strip(),
+                "sheet_url": self.sheet_entry.get().strip(),
+                "sheet_preset": self.sheet_dropdown.get(),
+                "use_default_song_count": self.use_default_song_count.get(),
+                "default_song_count": self.new_song_count_var.get(),
+                "fade_audio": self.fade_audio_var.get(),
+                "export_timestamp": self.export_timestamp_var.get(),
+                "auto_upload": self.auto_upload_var.get()
+            }
+        except Exception as e:
+            logging.error(f"Error getting current settings: {e}")
+            return {}
+
+    def save_current_ui_state(self):
+        """Save current UI state to settings manager"""
+        try:
+            current_settings = self.get_current_settings()
+            
+            # Save to settings manager
+            self.settings_manager.update_section('ui', {
+                'output_folder': current_settings['output_folder'],
+                'music_folder': current_settings['music_folder'],
+                'loop_duration': current_settings['loop_duration']
+            })
+            
+            self.settings_manager.update_section('sheets', {
+                'sheet_url': current_settings['sheet_url'],
+                'sheet_preset': current_settings['sheet_preset']
+            })
+            
+            self.settings_manager.update_section('processing', {
+                'use_default_song_count': current_settings['use_default_song_count'],
+                'default_song_count': current_settings['default_song_count'],
+                'fade_audio': current_settings['fade_audio'],
+                'export_timestamp': current_settings['export_timestamp'],
+                'auto_upload': current_settings['auto_upload']
+            })
+            
+            logging.debug("UI state saved to settings manager")
+            
+        except Exception as e:
+            logging.error(f"Error saving UI state: {e}")
+
+    def on_setting_changed(self, setting_key, value):
+        """Handle individual setting changes - NEW METHOD"""
+        try:
+            # Map UI events to settings keys
+            key_mapping = {
+                'output_folder': 'ui.output_folder',
+                'music_folder': 'ui.music_folder',
+                'duration': 'ui.loop_duration',
+                'sheet_url': 'sheets.sheet_url',
+                'sheet_preset': 'sheets.sheet_preset',
+                'fade_audio': 'processing.fade_audio',
+                'auto_upload': 'processing.auto_upload'
+            }
+            
+            settings_key = key_mapping.get(setting_key, setting_key)
+            self.settings_manager.set(settings_key, value)
+            
+            # Notify controller if needed
+            if hasattr(self.controller, 'on_setting_changed'):
+                self.controller.on_setting_changed(setting_key, value)
+                
+        except Exception as e:
+            logging.error(f"Error handling setting change {setting_key}: {e}")
 
     def on_close(self):
-        """Handle window close event"""
+        """Handle window close event - UPDATED METHOD"""
         if self.rendering:
             if not messagebox.askyesno("Confirm Exit", "Processing is in progress. Are you sure you want to exit?"):
                 return
@@ -1025,16 +1181,75 @@ class BatchProcessorUI(TkinterDnD.Tk):
             # Stop processing
             self.stop_processing()
         
-        # Save settings before exit
-        self.controller.save_settings(self.get_current_settings())
+        try:
+            # Save current UI state before closing
+            self.save_current_ui_state()
+            
+            # Save window geometry and position
+            if self.settings_manager.get("advanced.track_window_position", True):
+                try:
+                    geometry = self.geometry()
+                    self.settings_manager.set("ui.window_geometry", geometry, save=False)
+                    
+                    x = self.winfo_rootx()
+                    y = self.winfo_rooty()
+                    self.settings_manager.set("ui.window_position", f"{x},{y}")
+                    
+                except Exception as e:
+                    logging.debug(f"Could not save window position: {e}")
+            
+            # Cleanup any pending callbacks
+            all_after = self.tk.call('after', 'info')
+            if all_after:
+                for after_id in all_after:
+                    try:
+                        self.after_cancel(after_id)
+                    except Exception:
+                        pass
+                        
+            # Clean up any scaling tracker
+            import customtkinter as ctk
+            for obj_name in dir(ctk):
+                if "tracking" in obj_name.lower():
+                    attr = getattr(ctk, obj_name, None)
+                    if attr and callable(getattr(attr, "stop", None)):
+                        try:
+                            attr.stop()
+                        except Exception:
+                            pass
+                            
+        except Exception as e:
+            logging.error(f"Error during window close: {e}")
         
-        # Destroy window, but wrap in a try/except to suppress any Tkinter errors during shutdown
+        # Destroy window
         try:
             self.destroy()
         except Exception:
             # Just ignore any errors during window destruction
             import sys
             sys.exit(0)  # Force exit cleanly
+
+    def on_close_handler(self):
+        """Handle application close - save settings"""
+        try:
+            # Save current UI state before closing
+            self.save_ui_settings()
+            
+            # Save window geometry if tracking enabled
+            if self.settings_manager.get("advanced.track_window_position", True):
+                try:
+                    geometry = self.ui.geometry()
+                    self.settings_manager.set("ui.window_geometry", geometry, save=False)
+                    
+                    x = self.ui.winfo_rootx()
+                    y = self.ui.winfo_rooty()
+                    self.settings_manager.set("ui.window_position", f"{x},{y}")
+                    
+                except Exception as e:
+                    logging.debug(f"Could not save window position: {e}")
+                    
+        except Exception as e:
+            logging.error(f"Error during application close: {e}")
 
     def create_context_menu(self):
         """Create the context menu for folders/files"""
@@ -1084,7 +1299,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
         if self.duration_input.get().isdigit():
             duration = int(self.duration_input.get())
         
-        h, m, s = self.format_duration(duration)
+        h, m, s = format_duration(duration)
         time_suffix = f"{h}h" if h > 0 else ""
         time_suffix += f"{m}m" if m > 0 else ""
         time_suffix += f"{s}s" if s > 0 else ""
@@ -1179,13 +1394,6 @@ class BatchProcessorUI(TkinterDnD.Tk):
                 output_label.pack(anchor="w", fill="x", pady=(0, 2))
                 
                 self.output_preview_labels.append(output_label)
-
-    def format_duration(self, seconds):
-        """Format seconds into hours, minutes, seconds"""
-        h = seconds // 3600
-        m = (seconds % 3600) // 60
-        s = seconds % 60
-        return h, m, s
 
     def select_item(self, path, is_folder=False, button=None):
         """Select an item (file or folder) with clear visual feedback"""
@@ -1607,7 +1815,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
         return f"#{r:02x}{g:02x}{b:02x}"
 
     def adjust_duration(self, seconds):
-        """Adjust the duration by the specified number of seconds"""
+        """Adjust the duration by the specified number of seconds - UPDATED METHOD"""
         try:
             # Get the current duration
             current_duration = int(self.duration_input.get())
@@ -1625,14 +1833,15 @@ class BatchProcessorUI(TkinterDnD.Tk):
             # Update the display
             self.update_duration_display(new_duration)
             
-            # Save the new duration in settings
-            self.controller.save_setting("loop_duration", str(new_duration))
+            # Save the setting immediately
+            self.on_setting_changed('duration', str(new_duration))
             
         except ValueError:
-            # If the current value isn't a valid integer, reset to 600 (10 minutes)
+            # If the current value isn't a valid integer, reset to default
+            default_duration = self.settings_manager.get("ui.loop_duration", "3600")
             self.duration_input.delete(0, tk.END)
-            self.duration_input.insert(0, "600")
-            self.update_duration_display(600)
+            self.duration_input.insert(0, default_duration)
+            self.update_duration_display(int(default_duration))
 
     def validate_and_display_duration(self, event=None):
         """Validate the duration input and update the display"""
@@ -1669,7 +1878,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
 
     def update_duration_display(self, seconds):
         """Update the display showing the duration in h:m:s format"""
-        h, m, s = self.format_duration_display(seconds)
+        h, m, s = format_duration(seconds)
         
         # Create display text
         display_text = ""
@@ -1682,10 +1891,66 @@ class BatchProcessorUI(TkinterDnD.Tk):
         
         # Update the display
         self.duration_display_var.set(f"({display_text.strip()})")
+    
+    def send_debug_info(self):
+        """Handle the Send Debug Info button click"""
+        try:
+            # Ask user for confirmation
+            confirm = messagebox.askyesno(
+                "Send Debug Information", 
+                "This will send your debug log and device information to support.\n\n"
+                "The debug log may contain file paths and application activity.\n"
+                "No passwords or sensitive data will be included.\n\n"
+                "Do you want to continue?",
+                parent=self
+            )
+            
+            if not confirm:
+                return
+            
+            # Import the function
+            from auth_module.email_auth import send_debug_info_to_support_enhanced
+            
+            # Show processing message
+            self.progress_var.set("Sending debug information...")
+            self.update_idletasks()
+            
+            # Send the debug info
+            success = send_debug_info_to_support_enhanced()
+            
+            if success:
+                messagebox.showinfo(
+                    "Debug Info Sent", 
+                    "Your debug information has been sent successfully!\n\n"
+                    "Support can now review your logs to help with any issues.",
+                    parent=self
+                )
+                self.progress_var.set("Debug information sent successfully")
+            else:
+                messagebox.showerror(
+                    "Failed to Send", 
+                    "Failed to send debug information.\n"
+                    "Please check your internet connection and try again.",
+                    parent=self
+                )
+                self.progress_var.set("Failed to send debug information")
+                
+        except Exception as e:
+            logging.error(f"Error sending debug info: {e}")
+            messagebox.showerror(
+                "Error", 
+                f"An error occurred while sending debug information:\n{str(e)}",
+                parent=self
+            )
 
-    def format_duration_display(self, seconds):
-        """Format seconds into hours, minutes, seconds for display"""
-        h = seconds // 3600
-        m = (seconds % 3600) // 60
-        s = seconds % 60
-        return h, m, s
+    def show_admin_monitoring(self):
+        """Show the admin monitoring dashboard"""
+        try:
+            self.controller.api_monitor.show_dashboard(parent_window=self)
+        except Exception as e:
+            logging.error(f"Error opening admin dashboard: {e}")
+            messagebox.showerror(
+                "Dashboard Error", 
+                f"Failed to open monitoring dashboard:\n{str(e)}", 
+                parent=self
+            )

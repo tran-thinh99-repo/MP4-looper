@@ -16,6 +16,7 @@ pyinstaller ^
   --noconfirm ^
   --windowed ^
   --onefile ^
+  --noconsole ^
   --name "MP4 Looper" ^
   --icon="mp4_looper_icon.ico" ^
   --distpath "MP4 Looper build" ^
@@ -28,6 +29,7 @@ pyinstaller ^
   --add-data "help_content_vi.md;." ^
   --add-data "credentials.json;." ^
   --add-data "mp4_looper_icon.ico;." ^
+  --add-data ".env;." ^
   --add-binary "..\\ffmpeg\\ffmpeg.exe;." ^
   --add-binary "..\\ffmpeg\\ffprobe.exe;." ^
   mp4_looper.py

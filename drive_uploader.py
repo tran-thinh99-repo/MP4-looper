@@ -11,9 +11,11 @@ import sys
 import time
 import logging
 import threading
+import gspread
 from queue import Queue
 
 from config import GOOGLE_DRIVE_ROOT_FOLDER_ID, GOOGLE_SPREADSHEET_ID, GOOGLE_SPREADSHEET_NAME, SCOPES
+from api_monitor_module import get_api_monitor
 
 # Google API imports
 from google.oauth2 import service_account
@@ -21,7 +23,8 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 from gspread.utils import a1_to_rowcol
-import gspread
+
+from google_services import get_drive_service, get_sheets_service, get_gspread_client
 
 # Mapping for file suffixes to Google Sheet columns
 COLUMN_MAP = {
@@ -58,10 +61,13 @@ class DriveUploader:
         self.status_callback = None
         self.uploaded_files = []
         
-        # API services
+        # API services - will be obtained from centralized manager
         self.drive_service = None
         self.sheets_service = None
         self.gspread_client = None
+
+        # Get API monitor for tracking
+        self.api_monitor = get_api_monitor()
     
     def set_callbacks(self, progress_callback=None, status_callback=None):
         """Set callback functions for progress reporting"""
@@ -69,25 +75,28 @@ class DriveUploader:
         self.status_callback = status_callback
     
     def connect(self):
-        """Initialize Google API connections"""
+        """Initialize Google API connections using centralized manager"""
         try:
-            # Load the credentials
-            self._log(f"Loading credentials from {self.service_account_path}")
-            if not os.path.exists(self.service_account_path):
-                raise FileNotFoundError(f"Credentials file not found: {self.service_account_path}")
-                
-            credentials = service_account.Credentials.from_service_account_file(
-                self.service_account_path, SCOPES=SCOPES)
+            self._log("Connecting to Google services using centralized manager...")
             
-            # Initialize services
-            self.drive_service = build('drive', 'v3', credentials=credentials)
-            self.sheets_service = build('sheets', 'v4', credentials=credentials)
-            self.gspread_client = gspread.authorize(credentials)
+            # Get services from centralized manager
+            self.drive_service = get_drive_service()
+            self.sheets_service = get_sheets_service()
+            self.gspread_client = get_gspread_client()
+            
+            # Check if all services are available
+            if not all([self.drive_service, self.sheets_service, self.gspread_client]):
+                self._log("Failed to get one or more Google services")
+                return False
             
             # Test drive access
-            about = self.drive_service.about().get(fields="user").execute()
-            email = about.get("user", {}).get("emailAddress", "unknown")
-            self._log(f"Connected to Google Drive as {email}")
+            try:
+                about = self.drive_service.about().get(fields="user").execute()
+                email = about.get("user", {}).get("emailAddress", "unknown")
+                self._log(f"Connected to Google Drive as {email}")
+            except Exception as e:
+                self._log(f"Failed to test Drive access: {e}")
+                return False
             
             # Test sheet access
             try:
@@ -96,8 +105,10 @@ class DriveUploader:
                 self._log(f"Connected to sheet: {self.sheet_name}")
             except Exception as e:
                 self._log(f"Warning: Failed to access sheet: {e}")
+                # Don't fail connection for sheet access issues
             
             return True
+            
         except Exception as e:
             self._log(f"Error connecting to Google services: {e}")
             return False
@@ -308,9 +319,10 @@ class DriveUploader:
                 self.failed_uploads.append((file_path, str(e)))
     
     def _upload_file(self, file_path, folder_id, max_retries=3):
-        """Upload a file to Google Drive with retries"""
+        """Upload a file to Google Drive with retries and monitoring metrics"""
         file_name = os.path.basename(file_path)
         file_size = os.path.getsize(file_path)
+        start_time = time.time()  # Track upload duration
         
         for attempt in range(1, max_retries + 1):
             try:
@@ -324,9 +336,9 @@ class DriveUploader:
                 
                 # Create media upload object with appropriate chunk size
                 # Larger files use larger chunks for better performance
-                chunk_size = 5 * 1024 * 1024  # 5MB
+                chunk_size = 5 * 1024 * 1024  # 5MB default
                 if file_size > 100 * 1024 * 1024:  # > 100MB
-                    chunk_size = 20 * 1024 * 1024  # 20MB
+                    chunk_size = 20 * 1024 * 1024  # 20MB for large files
                 
                 media = MediaFileUpload(file_path, resumable=True, chunksize=chunk_size)
                 
@@ -354,8 +366,22 @@ class DriveUploader:
                 # Get the file ID
                 file_id = response.get("id")
                 if file_id:
+                    upload_duration = time.time() - start_time
                     self._log(f"Successfully uploaded: {file_name}")
                     self._report_progress(file_name, 1.0)  # Mark as complete
+                    
+                    # Record custom metrics if monitoring is available
+                    if self.api_monitor:
+                        self.api_monitor.record_custom_metric("upload_duration", upload_duration, "seconds")
+                        self.api_monitor.record_custom_metric("upload_file_size", file_size, "bytes")
+                        self.api_monitor.record_custom_metric("upload_chunk_size", chunk_size, "bytes")
+                        self.api_monitor.record_custom_metric("upload_attempts", attempt, "count")
+                        
+                        # Calculate upload speed (MB/s)
+                        if upload_duration > 0:
+                            upload_speed = (file_size / (1024 * 1024)) / upload_duration  # MB/s
+                            self.api_monitor.record_custom_metric("upload_speed", upload_speed, "MB/s")
+                    
                     return file_id
                 else:
                     raise Exception("File ID not returned after upload")
@@ -365,27 +391,77 @@ class DriveUploader:
                     # Exponential backoff for retryable errors
                     wait_time = min(2 ** attempt * 10, 120)  # Max 2 minutes
                     self._log(f"Upload attempt {attempt} failed with status {e.resp.status}, retrying in {wait_time}s: {file_name}")
+                    
+                    # Record retry metrics
+                    if self.api_monitor:
+                        self.api_monitor.record_custom_metric("upload_retries", 1, "count")
+                        self.api_monitor.record_custom_metric("upload_error_status", e.resp.status, "http_status")
+                    
                     time.sleep(wait_time)
                 else:
-                    self._log(f"Upload failed after {attempt} attempts: {file_name}")
+                    error_msg = f"Upload failed after {attempt} attempts with HTTP {e.resp.status}: {file_name}"
+                    self._log(error_msg)
                     self.failed_uploads.append((file_path, str(e)))
+                    
+                    # Record failure metrics
+                    if self.api_monitor:
+                        self.api_monitor.record_custom_metric("upload_failures", 1, "count")
+                        self.api_monitor.record_custom_metric("failed_upload_size", file_size, "bytes")
+                        self.api_monitor.record_custom_metric("final_error_status", e.resp.status, "http_status")
+                    
                     return None
+                    
             except Exception as e:
-                self._log(f"Upload error for {file_name}: {e}")
+                error_msg = f"Upload error for {file_name}: {e}"
+                self._log(error_msg)
+                
                 if attempt < max_retries:
                     wait_time = min(2 ** attempt * 5, 60)  # Max 1 minute
                     self._log(f"Upload error, retrying in {wait_time}s: {file_name}")
+                    
+                    # Record retry metrics
+                    if self.api_monitor:
+                        self.api_monitor.record_custom_metric("upload_retries", 1, "count")
+                        self.api_monitor.record_custom_metric("upload_errors", 1, "count")
+                    
                     time.sleep(wait_time)
                 else:
                     self._log(f"Upload failed after {attempt} attempts: {file_name}")
                     self.failed_uploads.append((file_path, str(e)))
+                    
+                    # Record final failure metrics
+                    if self.api_monitor:
+                        upload_duration = time.time() - start_time
+                        self.api_monitor.record_custom_metric("upload_failures", 1, "count")
+                        self.api_monitor.record_custom_metric("failed_upload_duration", upload_duration, "seconds")
+                        self.api_monitor.record_custom_metric("failed_upload_size", file_size, "bytes")
+                    
                     return None
         
+        # This should never be reached, but just in case
         return None
-    
+
     def _make_file_public(self, file_id):
-        """Make a file publicly accessible with a link"""
+        """Make a file publicly accessible with monitoring"""
+        if self.api_monitor:
+            @self.api_monitor.track("drive_make_public", max_calls=100, window_minutes=60)
+            def _public_impl():
+                return self._make_file_public_impl(file_id)
+            
+            return _public_impl()
+        else:
+            return self._make_file_public_impl(file_id)
+    
+    def _make_file_public_impl(self, file_id):
+        """Implementation using centralized Drive service"""
         try:
+            # Ensure we have a Drive service
+            if not self.drive_service:
+                self.drive_service = get_drive_service()
+                if not self.drive_service:
+                    self._log("Failed to get Drive service for making file public")
+                    return False
+            
             self.drive_service.permissions().create(
                 fileId=file_id,
                 body={"type": "anyone", "role": "reader"},
@@ -393,12 +469,19 @@ class DriveUploader:
             ).execute()
             return True
         except Exception as e:
-            self._log(f"Failed to make file {file_id} public: {e}")
+            logging.error(f"Failed to make file {file_id} public: {e}")
             return False
     
     def _get_web_link(self, file_id):
-        """Get the web view link for a file"""
+        """Get the web view link for a file using centralized service"""
         try:
+            # Ensure we have a Drive service
+            if not self.drive_service:
+                self.drive_service = get_drive_service()
+                if not self.drive_service:
+                    self._log("Failed to get Drive service for web link")
+                    return None
+            
             file_meta = self.drive_service.files().get(
                 fileId=file_id, 
                 fields="webViewLink", 
@@ -410,7 +493,7 @@ class DriveUploader:
             return None
     
     def _update_sheet_with_link(self, filename, web_link, song_list_content):
-        """Update Google Sheet with file link and song list note"""
+        """Update Google Sheet with file link and song list note using centralized services"""
         try:
             # Check if filename matches expected pattern (preserve leading zeros in the ID)
             match = re.match(r"(\d+)(_1h\.mp4|_3h\.mp4|_11h\.mp4|_3m\.mp4)$", filename)
@@ -431,6 +514,19 @@ class DriveUploader:
             if not col:
                 self._log(f"No column mapping found for suffix: {suffix}")
                 return False
+            
+            # Ensure we have gspread client and sheets service
+            if not self.gspread_client:
+                self.gspread_client = get_gspread_client()
+                if not self.gspread_client:
+                    self._log("Failed to get gspread client")
+                    return False
+            
+            if not self.sheets_service:
+                self.sheets_service = get_sheets_service()
+                if not self.sheets_service:
+                    self._log("Failed to get Sheets service")
+                    return False
             
             # Open the spreadsheet and worksheet
             sheet = self.gspread_client.open_by_key(self.spreadsheet_id).worksheet(self.sheet_name)
@@ -470,6 +566,7 @@ class DriveUploader:
             
             if note_text:
                 # Convert A1 notation to row/column indices
+                from gspread.utils import a1_to_rowcol
                 row_idx, col_idx = a1_to_rowcol(cell)
                 
                 # Get the sheet ID
@@ -511,15 +608,42 @@ class DriveUploader:
             
         except Exception as e:
             self._log(f"Failed to update sheet with link for {filename}: {e}")
-            return False
     
     def _get_or_create_folder(self, folder_name):
-        """Get or create a Google Drive folder"""
+        """Get or create a Google Drive folder with monitoring and centralized service"""
+        if self.api_monitor:
+            @self.api_monitor.track("drive_folder_create", max_calls=100, window_minutes=60)
+            def _folder_impl():
+                return self._get_or_create_folder_impl(folder_name)
+            
+            return _folder_impl()
+        else:
+            return self._get_or_create_folder_impl(folder_name)
+    
+    def _get_or_create_folder_impl(self, folder_name):
+        """Implementation using centralized Drive service"""
+        start_time = time.time()
+        
         # Check cache first
         if folder_name in self.folder_cache:
+            cache_hit_duration = time.time() - start_time
+            self._log(f"Found existing folder '{folder_name}' in cache → {self.folder_cache[folder_name]}")
+            
+            # Record cache hit metrics
+            if self.api_monitor:
+                self.api_monitor.record_custom_metric("folder_cache_hits", 1, "count")
+                self.api_monitor.record_custom_metric("folder_cache_lookup_time", cache_hit_duration, "seconds")
+            
             return self.folder_cache[folder_name]
         
         try:
+            # Ensure we have a Drive service
+            if not self.drive_service:
+                self.drive_service = get_drive_service()
+                if not self.drive_service:
+                    self._log("Failed to get Drive service")
+                    return None
+            
             # Search for folder with the given name in the parent folder
             query = (
                 f"'{self.root_folder_id}' in parents and "
@@ -528,6 +652,7 @@ class DriveUploader:
                 f"trashed = false"
             )
             
+            search_start = time.time()
             results = self.drive_service.files().list(
                 q=query,
                 spaces="drive",
@@ -535,6 +660,7 @@ class DriveUploader:
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True
             ).execute()
+            search_duration = time.time() - search_start
             
             folders = results.get("files", [])
             
@@ -542,7 +668,17 @@ class DriveUploader:
                 # Folder found, cache and return ID
                 folder_id = folders[0]["id"]
                 self.folder_cache[folder_name] = folder_id
+                total_duration = time.time() - start_time
+                
                 self._log(f"Found existing folder '{folder_name}' → {folder_id}")
+                
+                # Record folder found metrics
+                if self.api_monitor:
+                    self.api_monitor.record_custom_metric("folder_search_time", search_duration, "seconds")
+                    self.api_monitor.record_custom_metric("folder_found", 1, "count")
+                    self.api_monitor.record_custom_metric("folder_lookup_total_time", total_duration, "seconds")
+                    self.api_monitor.record_custom_metric("folders_in_cache", len(self.folder_cache), "count")
+                
                 return folder_id
             
             # Folder not found, create new one
@@ -554,19 +690,40 @@ class DriveUploader:
                 "parents": [self.root_folder_id]
             }
             
+            create_start = time.time()
             folder = self.drive_service.files().create(
                 body=file_metadata,
                 fields="id",
                 supportsAllDrives=True
             ).execute()
+            create_duration = time.time() - create_start
             
             folder_id = folder["id"]
             self.folder_cache[folder_name] = folder_id
+            total_duration = time.time() - start_time
+            
             self._log(f"Created new folder '{folder_name}' → {folder_id}")
+            
+            # Record folder creation metrics
+            if self.api_monitor:
+                self.api_monitor.record_custom_metric("folder_search_time", search_duration, "seconds")
+                self.api_monitor.record_custom_metric("folder_create_time", create_duration, "seconds")
+                self.api_monitor.record_custom_metric("folder_created", 1, "count")
+                self.api_monitor.record_custom_metric("folder_total_time", total_duration, "seconds")
+                self.api_monitor.record_custom_metric("folders_in_cache", len(self.folder_cache), "count")
+            
             return folder_id
             
         except Exception as e:
-            self._log(f"Failed to get or create folder '{folder_name}': {e}")
+            error_duration = time.time() - start_time
+            error_msg = f"Failed to get or create folder '{folder_name}': {e}"
+            self._log(error_msg)
+            
+            # Record folder error metrics
+            if self.api_monitor:
+                self.api_monitor.record_custom_metric("folder_errors", 1, "count")
+                self.api_monitor.record_custom_metric("folder_error_time", error_duration, "seconds")
+            
             return None
     
     def _group_files_by_base(self, folder_path, only_file=None):
@@ -682,7 +839,6 @@ def upload_files(output_folder, only_file=None, progress_callback=None, status_c
     except Exception as e:
         logging.error(f"Error starting upload: {e}")
         return False
-
 
 # Command-line interface when run as a script
 def main():

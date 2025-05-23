@@ -1,15 +1,18 @@
+# mp4_looper.py - FIXED API MONITOR SETUP
 import os
 import subprocess
 import logging
 import psutil
 import re
+import sys
+import json
 import customtkinter as ctk
 from pathlib import Path
 from tkinter import messagebox
 from dotenv import load_dotenv
 
 # Import modules from existing application
-from utils import (setup_logging, disable_cmd_edit_mode, check_environment_vars,
+from utils import (setup_logging, disable_cmd_edit_mode, check_environment_vars, format_duration,
                   open_folder, check_canceled_upload_folder_status)
 from song_utils import generate_song_list_from_google_sheet
 from post_render_check import validate_render
@@ -19,13 +22,73 @@ from dependency_checker import main as check_dependencies
 from paths import get_resource_path, get_base_path, clean_folder_with_confirmation
 from update_module.update_checker import UpdateChecker
 
+from auth_module.email_auth import handle_authentication
+
+from settings_manager import get_settings
+
 class MP4LooperApp:
     def __init__(self):
         setup_logging()
-        load_dotenv()
+        load_environment_variables()  # Remove load_dotenv() - load_environment_variables() handles it
+
+        # Initialize settings manager EARLY
+        self.settings_manager = get_settings()
 
         # Check environment variables and log their status
         check_environment_vars()
+        
+        # Initialize this attribute to track initialization status
+        self.initialized = False
+        
+        # Check authentication - ONLY use handle_authentication()
+        if not handle_authentication():
+            logging.warning("Authentication failed or cancelled. Exiting application.")
+            sys.exit(0)
+
+        # FIXED: Initialize API monitoring with proper error handling
+        try:
+            # Import with fallback handling
+            try:
+                from api_monitor_module import setup_monitoring
+                
+                self.api_monitor = setup_monitoring(
+                    app_name="MP4 Looper",
+                    admin_emails=["admin@vicgmail.com"],
+                    auto_cleanup=True
+                )
+                logging.info("✅ API monitoring initialized")
+                
+                # Set up global reference for monitor_access
+                import api_monitor_module.utils.monitor_access as monitor_access
+                monitor_access._api_monitor_cache = self.api_monitor
+                monitor_access._cache_checked = False  # Reset the cache check
+                
+                # Test the monitoring system
+                stats = self.api_monitor.get_stats_summary()
+                logging.info(f"✅ API monitoring active - Total calls: {stats['overview']['total_calls_ever']}")
+                
+            except ImportError as import_err:
+                logging.warning(f"API monitoring module not available: {import_err}")
+                self.api_monitor = self._create_dummy_monitor()
+                
+            except Exception as setup_err:
+                logging.warning(f"API monitoring setup failed: {setup_err}")
+                self.api_monitor = self._create_dummy_monitor()
+                
+        except Exception as e:
+            logging.error(f"❌ Critical error in API monitoring setup: {e}")
+            self.api_monitor = self._create_dummy_monitor()
+            
+        # Set the cache reference even for dummy monitor
+        try:
+            import api_monitor_module.utils.monitor_access as monitor_access
+            monitor_access._api_monitor_cache = self.api_monitor
+            monitor_access._cache_checked = False
+        except:
+            pass
+
+        import gc
+        gc.collect()
         
         # Application settings
         self.app_name = "MP4 Looper"
@@ -53,62 +116,208 @@ class MP4LooperApp:
         self.ui.iconbitmap(default=icon_path)
 
         disable_cmd_edit_mode()
-        check_dependencies()
 
         # State variables
-        self.settings = {}
         self.current_process = None
         self.process_pid = None
         self.rendering = False
         self.was_stopped = False
         
-        # Load saved settings
-        self.load_settings()
-        
-        # Initialize UI
-        self.ui.apply_settings(self.settings)
+        # Apply saved settings to UI
+        self.apply_saved_settings()
         
         # Check for canceled uploads
         check_canceled_upload_folder_status()
-
-    def load_settings(self):
-        """Load saved settings"""
-        settings_path = SETTINGS_FILE
         
-        if os.path.exists(settings_path):
-            try:
-                with open(settings_path, "r", encoding="utf-8") as f:
-                    self.settings = json.load(f)
-                logging.info(f"Settings loaded from {settings_path}")
-            except Exception as e:
-                logging.error(f"Failed to load settings: {e}")
-                self.settings = {}
-        else:
-            self.settings = {}
+        # Mark as successfully initialized
+        self.initialized = True
 
-    def save_settings(self, settings=None):
-        """Save current settings"""
-        if settings is None:
-            settings = self.ui.get_current_settings()
+    def _create_dummy_monitor(self):
+        """Create a dummy monitor object that won't cause crashes"""
+        class DummyMonitor:
+            def is_admin_user(self, email=None): 
+                # Check against admin emails directly
+                if email is None:
+                    try:
+                        from auth_module.email_auth import get_current_user
+                        email = get_current_user()
+                    except ImportError:
+                        return False
+                admin_emails = ["admin@vicgmail.com"]
+                return email in admin_emails
             
+            def get_stats_summary(self):
+                return {'overview': {'total_calls_ever': 0}}
+            
+            def record_custom_metric(self, *args, **kwargs):
+                pass
+            
+            def export_data(self, *args, **kwargs):
+                return None
+            
+            def cleanup_old_data(self):
+                pass
+                
+            def show_dashboard(self, parent_window=None):
+                from tkinter import messagebox
+                messagebox.showinfo(
+                    "Dashboard Unavailable", 
+                    "The monitoring dashboard is not available.\n\n"
+                    "This may be due to missing Python dependencies.\n"
+                    "The application will continue to work normally.",
+                    parent=parent_window
+                )
+        
+        logging.info("✅ Dummy API monitor created - application will work without monitoring")
+        return DummyMonitor()
+
+    # KEEP THIS METHOD for backward compatibility during transition
+    def load_settings(self):
+        """TRANSITION METHOD: Load settings using new settings manager"""
         try:
-            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                json.dump(settings, f, indent=2)
-            logging.debug(f"Settings saved to {SETTINGS_FILE}")
+            return self.get_legacy_settings()
         except Exception as e:
-            logging.error(f"Failed to save settings: {e}")
-    
+            logging.error(f"Error in load_settings transition method: {e}")
+            return {}
+
+    # KEEP THIS METHOD for backward compatibility during transition  
+    def save_settings(self, settings=None):
+        """TRANSITION METHOD: Save settings using new settings manager"""
+        try:
+            if settings:
+                # Convert old format to new format
+                self.save_legacy_settings(settings)
+            else:
+                # Save current UI state
+                self.save_ui_settings()
+        except Exception as e:
+            logging.error(f"Error in save_settings transition method: {e}")
+
+    def get_legacy_settings(self):
+        """Get settings in old format for backward compatibility"""
+        try:
+            return {
+                "output_folder": self.settings_manager.get("ui.output_folder", ""),
+                "music_folder": self.settings_manager.get("ui.music_folder", ""),
+                "loop_duration": self.settings_manager.get("ui.loop_duration", "3600"),
+                "sheet_url": self.settings_manager.get("sheets.sheet_url", ""),
+                "sheet_preset": self.settings_manager.get("sheets.sheet_preset", "Reggae"),
+                "use_default_song_count": self.settings_manager.get("processing.use_default_song_count", True),
+                "default_song_count": self.settings_manager.get("processing.default_song_count", "5"),
+                "fade_audio": self.settings_manager.get("processing.fade_audio", True),
+                "export_timestamp": self.settings_manager.get("processing.export_timestamp", True),
+                "auto_upload": self.settings_manager.get("processing.auto_upload", False)
+            }
+        except Exception as e:
+            logging.error(f"Error getting legacy settings: {e}")
+            return {}
+
+    def save_legacy_settings(self, settings):
+        """Save settings from old format to new format"""
+        try:
+            # Map old keys to new structure
+            key_mapping = {
+                "output_folder": "ui.output_folder",
+                "music_folder": "ui.music_folder", 
+                "loop_duration": "ui.loop_duration",
+                "sheet_url": "sheets.sheet_url",
+                "sheet_preset": "sheets.sheet_preset",
+                "use_default_song_count": "processing.use_default_song_count",
+                "default_song_count": "processing.default_song_count",
+                "auto_upload": "processing.auto_upload",
+                "fade_audio": "processing.fade_audio",
+                "export_timestamp": "processing.export_timestamp"
+            }
+            
+            # Save each setting
+            for old_key, value in settings.items():
+                new_key = key_mapping.get(old_key, old_key)
+                self.settings_manager.set(new_key, value, save=False)
+            
+            # Save all changes at once
+            self.settings_manager._save_settings()
+            
+        except Exception as e:
+            logging.error(f"Error saving legacy settings: {e}")
+
+    def apply_saved_settings(self):
+        """Apply saved settings to UI components"""
+        try:
+            # Get settings in the format UI expects
+            settings = self.get_legacy_settings()
+            
+            # Apply to UI
+            self.ui.apply_settings(settings)
+            
+            logging.info("Settings applied to UI successfully")
+            
+        except Exception as e:
+            logging.error(f"Error applying settings: {e}")
+
     def save_setting(self, key, value):
-        """Save a single setting value"""
-        self.settings[key] = value
-        self.save_settings()
+        """Save a single setting value - UPDATED METHOD"""
+        try:
+            # Map old keys to new structure
+            key_mapping = {
+                "output_folder": "ui.output_folder",
+                "music_folder": "ui.music_folder", 
+                "loop_duration": "ui.loop_duration",
+                "sheet_url": "sheets.sheet_url",
+                "sheet_preset": "sheets.sheet_preset",
+                "auto_upload": "processing.auto_upload",
+                "fade_audio": "processing.fade_audio",
+                "export_timestamp": "processing.export_timestamp"
+            }
+            
+            # Use mapped key or original key
+            settings_key = key_mapping.get(key, key)
+            
+            self.settings_manager.set(settings_key, value)
+            logging.debug(f"Setting saved: {settings_key} = {value}")
+            
+        except Exception as e:
+            logging.error(f"Error saving setting {key}: {e}")
+
+    def save_ui_settings(self):
+        """Save current UI state to settings"""
+        try:
+            if hasattr(self, 'ui'):
+                current_settings = self.ui.get_current_settings()
+                
+                # Update settings manager with current UI state
+                self.settings_manager.update_section('ui', {
+                    'output_folder': current_settings.get('output_folder', ''),
+                    'music_folder': current_settings.get('music_folder', ''),
+                    'loop_duration': current_settings.get('loop_duration', '3600')
+                })
+                
+                self.settings_manager.update_section('sheets', {
+                    'sheet_url': current_settings.get('sheet_url', ''),
+                    'sheet_preset': current_settings.get('sheet_preset', 'Reggae')
+                })
+                
+                self.settings_manager.update_section('processing', {
+                    'use_default_song_count': current_settings.get('use_default_song_count', True),
+                    'default_song_count': current_settings.get('default_song_count', '5'),
+                    'fade_audio': current_settings.get('fade_audio', True),
+                    'export_timestamp': current_settings.get('export_timestamp', True),
+                    'auto_upload': current_settings.get('auto_upload', False)
+                })
+                
+                logging.info("UI settings saved successfully")
+                
+        except Exception as e:
+            logging.error(f"Error saving UI settings: {e}")
 
     def get_sheet_presets(self):
         """Return available sheet preset names for dropdown"""
-        # Return list of preset keys (names) or a default value if empty
         if self.sheet_presets:
             return list(self.sheet_presets.keys())
         return ["No Presets"]
+    
+    def get_sheet_preset_url(self, preset_name):
+        """Get URL for a sheet preset"""
+        return self.sheet_presets.get(preset_name, "")
     
     # When initializing the sheet dropdown in the UI
     def init_sheet_dropdown(self):
@@ -125,10 +334,6 @@ class MP4LooperApp:
         # Select first item by default if available
         if presets:
             self.sheet_dropdown.set(presets[0])
-
-    def get_sheet_preset_url(self, preset_name):
-        """Get URL for a sheet preset"""
-        return self.sheet_presets.get(preset_name, "")
 
     def open_folder(self, path, label="Folder", parent=None):
         """Open a folder in file explorer"""
@@ -223,7 +428,7 @@ class MP4LooperApp:
         return True
 
     def process_files(self, params, ui):
-        """Process all files in the queue"""
+        """Process all files in the queue with batch optimization"""
         self.rendering = True
         ui.rendering = True
         
@@ -239,6 +444,14 @@ class MP4LooperApp:
         
         total_files = len(file_paths)
         
+        # Track batch processing start - FIXED with error handling
+        try:
+            from api_monitor_module.utils.monitor_access import track_api_call_simple
+            track_api_call_simple("batch_processing_start", success=True, total_files=total_files)
+        except ImportError:
+            logging.debug("API tracking not available - continuing without tracking")
+        
+        # Initialize batch song generator (this will reuse connections/data)
         for index, file_path in enumerate(file_paths[:]):
             if not self.rendering or not ui.rendering:
                 break
@@ -251,7 +464,7 @@ class MP4LooperApp:
             
             # Generate output filename
             base_name = os.path.splitext(file_name)[0]
-            h, m, s = self.format_duration(duration)
+            h, m, s = format_duration(duration)
             time_suffix = f"{h}h" if h > 0 else ""
             time_suffix += f"{m}m" if m > 0 else ""
             time_suffix += f"{s}s" if s > 0 else ""
@@ -260,8 +473,9 @@ class MP4LooperApp:
             logging.info(f"Processing file {index+1}/{total_files}: {file_name}")
             logging.info(f"Output: {output_name}, Duration: {duration}s")
             
-            # Generate song list
-            if not self.generate_song_list(base_name, duration, output_folder, music_folder, sheet_url, new_song_count, export_timestamp):
+            # Generate song list using batch-optimized method
+            if not self.generate_song_list(base_name, duration, output_folder, music_folder, 
+                                            sheet_url, new_song_count, export_timestamp):
                 logging.error("Failed to generate song list, skipping file")
                 continue
                 
@@ -271,19 +485,21 @@ class MP4LooperApp:
             if success and auto_upload:
                 self.upload_to_drive(output_folder, output_name)
         
+        # Track batch processing completion - FIXED with error handling
+        try:
+            from api_monitor_module.utils.monitor_access import track_api_call_simple
+            track_api_call_simple("batch_processing_complete", success=True, 
+                                files_processed=index+1 if 'index' in locals() else 0)
+        except ImportError:
+            logging.debug("API tracking not available for completion")
+        
         # Update UI when done
         self.rendering = False
         ui.processing_complete()
 
-    def format_duration(self, seconds):
-        """Format seconds into hours, minutes, seconds"""
-        h = seconds // 3600
-        m = (seconds % 3600) // 60
-        s = seconds % 60
-        return h, m, s
-
-    def generate_song_list(self, base_name, duration, output_folder, music_folder, sheet_url, new_song_count, export_timestamp):
-        """Generate song list for the current file using direct sheet access"""
+    def generate_song_list(self, base_name, duration, output_folder, music_folder, 
+                           sheet_url, new_song_count, export_timestamp):
+        """Generate song list using batch optimization"""
         try:
             output_filename = f"{base_name}_song_list.txt"
             
@@ -299,7 +515,10 @@ class MP4LooperApp:
                 logging.info(f"Converted sheet URL to direct access: {direct_url}")
                 sheet_url = direct_url
             
-            result = generate_song_list_from_google_sheet(
+            # Use batch-optimized song generation
+            from song_utils import generate_song_list_for_batch
+            
+            result = generate_song_list_for_batch(
                 sheet_url=sheet_url,
                 output_filename=output_filename,
                 duration_in_seconds=duration,
@@ -324,7 +543,7 @@ class MP4LooperApp:
             return bool(result)
             
         except Exception as e:
-            logging.error(f"Error generating song list: {e}")
+            logging.error(f"Error generating song list (batch): {e}")
             return False
 
     def render_video(self, input_file, output_folder, output_name, duration, fade_audio, ui):
@@ -366,12 +585,20 @@ class MP4LooperApp:
             # Update progress bar to 0
             ui.update_progress(0, "Starting render...")
             
-            # Start FFmpeg process
+            # Start FFmpeg process with CREATE_NO_WINDOW flag
+            startupinfo = None
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+
             self.current_process = subprocess.Popen(
                 ffmpeg_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True
+                text=True,
+                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             )
             
             # Track process for pause/stop functionality
@@ -535,14 +762,77 @@ class MP4LooperApp:
             logging.error(f"Upload error: {e}")
             messagebox.showerror("Upload Failed", f"Error: {str(e)}")
             return False
-                
+
+    def is_admin_user(self, user_email=None):
+        """Check if current user is admin (needed for showing admin button)"""
+        try:
+            return self.api_monitor.is_admin_user(user_email)
+        except AttributeError:
+            # If api_monitor is not initialized yet, check manually
+            if user_email is None:
+                try:
+                    from auth_module.email_auth import get_current_user
+                    user_email = get_current_user()
+                except ImportError:
+                    return False
+            
+            # Check against admin emails directly
+            admin_emails = ["admin@vicgmail.com"]  # Your admin email
+            return user_email in admin_emails
+        
+def load_environment_variables():
+    """Load environment variables from .env file, handling PyInstaller paths"""
+    try:
+        # First, check if running as PyInstaller bundle
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            # When running as PyInstaller onefile, .env is in _MEIPASS
+            env_path = os.path.join(sys._MEIPASS, '.env')
+            logging.debug(f"Looking for .env file in PyInstaller temp dir: {env_path}")
+            if os.path.exists(env_path):
+                logging.info(f"Loading .env from PyInstaller temp dir: {env_path}")
+                load_dotenv(env_path)
+                return True
+        
+        # If not found in _MEIPASS or not running from PyInstaller,
+        # try in the application directory
+        app_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else sys.argv[0]))
+        env_path = os.path.join(app_dir, '.env')
+        
+        logging.debug(f"Looking for .env file in app dir: {env_path}")
+        if os.path.exists(env_path):
+            logging.info(f"Loading .env from app dir: {env_path}")
+            load_dotenv(env_path)
+            return True
+            
+        # Try one directory up (parent directory)
+        parent_dir = os.path.abspath(os.path.join(app_dir, '..'))
+        env_path = os.path.join(parent_dir, '.env')
+        
+        logging.debug(f"Looking for .env file in parent dir: {env_path}")
+        if os.path.exists(env_path):
+            logging.info(f"Loading .env from parent dir: {env_path}")
+            load_dotenv(env_path)
+            return True
+            
+        logging.warning("Could not find .env file in any location")
+        return False
+        
+    except Exception as e:
+        logging.error(f"Error loading environment variables: {e}")
+        return False
+        
 if __name__ == "__main__":
-    # Create a missing import
-    import json
-    
     try:
         app = MP4LooperApp()
-        app.run()
+        
+        # Only run the app if it was fully initialized (authentication succeeded)
+        if hasattr(app, 'initialized') and app.initialized:
+            app.run()
+        else:
+            # Authentication was cancelled, exit gracefully
+            logging.info("Exiting application due to authentication cancellation")
+            sys.exit(0)  # Exit with code 0 (success)
+            
     except Exception as e:
         logging.error(f"Fatal error: {e}")
         print(f"Fatal error: {e}")

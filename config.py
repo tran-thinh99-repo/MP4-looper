@@ -26,3 +26,10 @@ GITHUB_REPO_NAME = os.getenv('GITHUB_REPO_NAME', 'MP4-looper')
 # Additional sheet presets available for import
 REGGAE_SHEET_URL = os.getenv('REGGAE_SHEET_URL', '')
 GOSPEL_SHEET_URL = os.getenv('GOSPEL_SHEET_URL', '')
+
+# Constants
+AUTH_SHEET_NAME = "Auth"  # The name of your sheet tab
+MAX_AUTH_AGE = 7 * 24 * 60 * 60  # 7 days in seconds
+AUTH_SHEET_ID = os.getenv("AUTH_SHEET_ID", "13on93GUGOMSHzMw3JemVnQQj0KRfFh-qf5xHd4pbVO0")
+
+DEFAULT_DURATION_SECONDS = 3600

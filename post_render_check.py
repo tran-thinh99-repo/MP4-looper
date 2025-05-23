@@ -1,14 +1,20 @@
 import subprocess
 import logging
 import os
+import sys
 import shutil
 
 def get_mp4_duration(file_path):
     try:
+        # Use CREATE_NO_WINDOW flag on Windows to prevent command window flashing
+        extra_args = {}
+        if sys.platform == "win32":
+            extra_args["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+            
         result = subprocess.run([
             "ffprobe", "-v", "error", "-show_entries",
             "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file_path
-        ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **extra_args)
         return float(result.stdout.strip())
     except Exception as e:
         logging.error(f"❌ Failed to read MP4 duration: {e}")
@@ -16,10 +22,15 @@ def get_mp4_duration(file_path):
 
 def has_audio_stream(file_path):
     try:
+        # Use CREATE_NO_WINDOW flag on Windows to prevent command window flashing
+        extra_args = {}
+        if sys.platform == "win32":
+            extra_args["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+            
         result = subprocess.run([
             "ffprobe", "-v", "error", "-select_streams", "a",
             "-show_entries", "stream=index", "-of", "csv=p=0", file_path
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **extra_args)
         return bool(result.stdout.strip())
     except Exception as e:
         logging.error(f"❌ Audio check failed: {e}")
@@ -53,11 +64,16 @@ def get_wav_duration(file_path, ffprobe_path="ffprobe"):
         return 0
 
     try:
+        # Use CREATE_NO_WINDOW flag on Windows to prevent command window flashing
+        extra_args = {}
+        if sys.platform == "win32":
+            extra_args["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+            
         result = subprocess.run([
             ffprobe_path, "-i", file_path,
             "-show_entries", "format=duration",
             "-v", "quiet", "-of", "csv=p=0"
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **extra_args)
 
         if result.returncode != 0:
             logging.error(f"❌ FFprobe failed: {result.stderr.strip()}")
@@ -69,7 +85,3 @@ def get_wav_duration(file_path, ffprobe_path="ffprobe"):
     except Exception as e:
         logging.warning(f"⚠️ Exception reading duration of {file_path}: {e}")
         return 0
-        
-def log_audio_duration(file_path):
-    dur = get_wav_duration(file_path)
-    logging.info(f"🎧 Audio duration: {dur:.2f}s")

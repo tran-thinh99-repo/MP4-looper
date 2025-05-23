@@ -234,7 +234,7 @@ def check_dependencies(exit_on_error=True, show_popup=True):
     # Summary
     logging.info("\n----- Dependency Check Summary -----")
     
-    # Check FFmpeg
+    # Check FFmpeg - CRITICAL
     if ffmpeg_results["ffmpeg"]["available"]:
         bundled_str = " (bundled)" if ffmpeg_results["ffmpeg"]["is_bundled"] else ""
         logging.info(f"✅ FFmpeg: Available{bundled_str} ({ffmpeg_results['ffmpeg']['path']})")
@@ -243,7 +243,7 @@ def check_dependencies(exit_on_error=True, show_popup=True):
         logging.error("❌ FFmpeg: Not found")
         critical_issues = True
         
-    # Check FFprobe
+    # Check FFprobe - CRITICAL
     if ffmpeg_results["ffprobe"]["available"]:
         bundled_str = " (bundled)" if ffmpeg_results["ffprobe"]["is_bundled"] else ""
         logging.info(f"✅ FFprobe: Available{bundled_str} ({ffmpeg_results['ffprobe']['path']})")
@@ -259,7 +259,7 @@ def check_dependencies(exit_on_error=True, show_popup=True):
     else:
         logging.warning("⚠️ No hardware acceleration available")
     
-    # NVIDIA - check driver version meets minimum requirements (576.02)
+    # NVIDIA - check driver version meets minimum requirements (576.02) - CRITICAL
     MINIMUM_DRIVER_VERSION = "576.02"
     
     if nvidia_results["drivers_installed"]:
@@ -270,7 +270,9 @@ def check_dependencies(exit_on_error=True, show_popup=True):
             if _compare_versions(current_version, MINIMUM_DRIVER_VERSION) >= 0:
                 logging.info(f"✅ NVIDIA drivers: Available (version {current_version})")
             else:
-                error_message += f"❌ NVIDIA driver version {current_version} is too old. Minimum required: {MINIMUM_DRIVER_VERSION}\n"
+                error_message += f"❌ NVIDIA driver version {current_version} is too old.\n"
+                error_message += f"   Minimum required: {MINIMUM_DRIVER_VERSION}\n"
+                error_message += f"   Please update your NVIDIA drivers.\n\n"
                 logging.error(f"❌ NVIDIA drivers: Version {current_version} is too old (minimum required: {MINIMUM_DRIVER_VERSION})")
                 critical_issues = True
                 
@@ -280,13 +282,28 @@ def check_dependencies(exit_on_error=True, show_popup=True):
             else:
                 logging.warning("⚠️ NVIDIA GPU detected but NVENC encoding is not available in FFmpeg")
         else:
-            logging.warning("⚠️ NVIDIA drivers found but version could not be determined")
+            # If we can't determine driver version, treat as critical
+            error_message += "❌ NVIDIA driver version could not be determined.\n"
+            error_message += "   Please ensure NVIDIA drivers are properly installed.\n\n"
+            logging.error("❌ NVIDIA drivers: Version could not be determined")
+            critical_issues = True
     else:
-        logging.warning("⚠️ NVIDIA drivers not detected")
+        # No NVIDIA drivers at all - CRITICAL
+        error_message += "❌ NVIDIA drivers not found.\n"
+        error_message += "   This application requires NVIDIA GPU with hardware acceleration.\n"
+        error_message += "   Please install NVIDIA drivers version {MINIMUM_DRIVER_VERSION} or higher.\n\n"
+        logging.error("❌ NVIDIA drivers: Not detected")
+        critical_issues = True
     
     # Handle critical issues
     if critical_issues:
         logging.error("\n❌ Critical dependency issues found.")
+        
+        # Add general instructions to error message
+        error_message += "Please resolve these issues before running the application:\n"
+        error_message += "1. Ensure NVIDIA drivers are installed and up to date\n"
+        error_message += "2. Verify FFmpeg is properly bundled with the application\n"
+        error_message += "3. Contact support if issues persist"
         
         # Show message box if requested
         if show_popup:

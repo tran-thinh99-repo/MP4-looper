@@ -7,6 +7,7 @@ __pycache__/
 build/
 dist/
 MP4 Looper build/
+monitoring_data/
 *.spec
 *.exe
 
@@ -22,6 +23,7 @@ debug.log
 # User-specific settings
 settings.json
 folder_id_map.json
+looper_settings.json
 
 # Temporary files
 temp_music.wav
@@ -55,3 +57,5 @@ git_init.bat
 
 # Environment variables
 .env
+
+*.enc

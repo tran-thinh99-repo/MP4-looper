@@ -165,14 +165,21 @@ def toggle_new_song_input(entry_widget, checkbox_var):
     logging.debug(f"Current song count input value: {entry_widget.get()}")
 
 def setup_logging():
-    log_path = Path(get_base_path()) / "debug.log"
+    # Use the same directory logic as auth storage
+    if getattr(sys, 'frozen', False):
+        # Running as a bundled executable
+        log_dir = os.path.dirname(sys.executable)
+    else:
+        # Running as a script
+        log_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    log_path = os.path.join(log_dir, "debug.log")
 
     # Get the root logger
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 
     # Remove existing FileHandlers to avoid duplicates
-    # (but preserve any StreamHandlers that might be needed)
     for handler in logger.handlers[:]:
         if isinstance(handler, logging.FileHandler):
             logger.removeHandler(handler)
@@ -192,6 +199,7 @@ def setup_logging():
         logger.addHandler(stream_handler)
 
     logging.debug("✅ Logging initialized")
+    logging.debug(f"Debug log location: {log_path}")
 
 def restart_app():
     try:
@@ -568,3 +576,9 @@ def check_environment_vars():
             logging.debug(f"✅ Environment variable {key}={masked_value}")
     
     return env_vars
+
+def format_duration(seconds):
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return h, m, s
