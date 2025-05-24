@@ -67,7 +67,8 @@ class SettingsManager:
                 "fade_audio": True,
                 "export_timestamp": True,
                 "auto_upload": False,
-                "hardware_acceleration": True
+                "hardware_acceleration": True,
+                "transition": "None"  # ADD THIS
             },
             
             # Advanced Settings

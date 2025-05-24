@@ -510,6 +510,25 @@ class BatchProcessorUI(TkinterDnD.Tk):
         )
         self.auto_upload_checkbox.pack(side="left")
         
+        # Add transition dropdown
+        transition_label = ctk.CTkLabel(
+            other_options_row,
+            text="Transition:",
+            font=("Segoe UI", 12)
+        )
+        transition_label.pack(side="left", padx=(20, 5))
+
+        self.transition_var = tk.StringVar(value="None")
+        self.transition_dropdown = ctk.CTkOptionMenu(
+            other_options_row,
+            values=["None", "fade", "slide_left", "slide_right", "zoom", 
+                    "wipe_down", "wipe_up", "blinds", "pixelate", 
+                    "dissolve", "expand_line"],
+            variable=self.transition_var,
+            width=120
+        )
+        self.transition_dropdown.pack(side="left", padx=(0, 20))
+
         # === Control Buttons ===
         control_frame = ctk.CTkFrame(main_container)
         control_frame.grid(row=r, column=0, sticky="ew", pady=10)
@@ -1035,7 +1054,8 @@ class BatchProcessorUI(TkinterDnD.Tk):
             "new_song_count": 5 if self.use_default_song_count.get() else int(self.new_song_count_var.get()),
             "export_timestamp": self.export_timestamp_var.get(),
             "fade_audio": self.fade_audio_var.get(),
-            "auto_upload": self.auto_upload_var.get()
+            "auto_upload": self.auto_upload_var.get(),
+            "transition": self.transition_var.get()  # ADD THIS
         }
         
         # Start processing thread
@@ -1236,6 +1256,9 @@ class BatchProcessorUI(TkinterDnD.Tk):
             if "auto_upload" in settings_dict:
                 self.auto_upload_var.set(settings_dict["auto_upload"])
                 
+            if "transition" in settings_dict:
+                self.transition_var.set(settings_dict["transition"])
+
             self.toggle_song_count()
             logging.debug("Settings applied to UI successfully")
             
@@ -1256,7 +1279,8 @@ class BatchProcessorUI(TkinterDnD.Tk):
                 "default_song_count": self.new_song_count_var.get(),
                 "fade_audio": self.fade_audio_var.get(),
                 "export_timestamp": self.export_timestamp_var.get(),
-                "auto_upload": self.auto_upload_var.get()
+                "auto_upload": self.auto_upload_var.get(),
+                "transition": self.transition_var.get()  # ADD THIS
             }
         except Exception as e:
             logging.error(f"Error getting current settings: {e}")

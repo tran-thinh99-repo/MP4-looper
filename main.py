@@ -342,17 +342,18 @@ class MP4LooperApp:
         export_timestamp = params["export_timestamp"]
         fade_audio = params["fade_audio"]
         auto_upload = params["auto_upload"]
+        transition = params.get("transition", "None")  # Get transition parameter
         
         total_files = len(file_paths)
         
-        # Track batch processing start - FIXED with error handling
+        # Track batch processing start
         try:
             from api_monitor_module.utils.monitor_access import track_api_call_simple
             track_api_call_simple("batch_processing_start", success=True, total_files=total_files)
         except ImportError:
             logging.debug("API tracking not available - continuing without tracking")
         
-        # Initialize batch song generator (this will reuse connections/data)
+        # Initialize batch song generator
         for index, file_path in enumerate(file_paths[:]):
             if not self.rendering or not ui.rendering:
                 break
@@ -363,8 +364,8 @@ class MP4LooperApp:
             ui.update_progress(0, f"Processing file {index+1} of {total_files}: {file_name}")
             ui.set_current_file(index, file_name)
             
-            # FIXED: Generate output filename that preserves suffix
-            base_name = os.path.splitext(file_name)[0]  # Remove .mp4 extension
+            # Generate output filename
+            base_name = os.path.splitext(file_name)[0]
             
             # Create duration suffix
             h, m, s = format_duration(duration)
@@ -372,30 +373,28 @@ class MP4LooperApp:
             time_suffix += f"{m}m" if m > 0 else ""
             time_suffix += f"{s}s" if s > 0 else ""
             
-            # FIXED: Preserve any existing suffix in the base name
-            # If base_name is "0248_3h", keep it as "0248_3h_1h.mp4" (not "0248_1h.mp4")
             output_name = f"{base_name}_{time_suffix}.mp4"
             
             logging.info(f"Processing file {index+1}/{total_files}: {file_name}")
-            logging.info(f"Output: {output_name}, Duration: {duration}s")
+            logging.info(f"Output: {output_name}, Duration: {duration}s, Transition: {transition}")
             
-            # FIXED: Generate song list filename that matches the video base name
-            # This ensures "0248_3h.mp4" gets "0248_3h_song_list.txt" (not "0248_song_list.txt")
+            # Generate song list filename
             song_list_filename = f"{base_name}_song_list.txt"
             
-            # Generate song list using batch-optimized method
+            # Generate song list
             if not self.generate_song_list(song_list_filename, duration, output_folder, music_folder, 
                                             sheet_url, new_song_count, export_timestamp):
                 logging.error("Failed to generate song list, skipping file")
                 continue
                 
-            # Render video
-            success = self.render_video(file_path, output_folder, output_name, duration, fade_audio, ui)
+            # Render video with transition
+            success = self.render_video(file_path, output_folder, output_name, duration, 
+                                    fade_audio, ui, transition)
             
             if success and auto_upload:
                 self.upload_to_drive(output_folder, output_name)
         
-        # Track batch processing completion - FIXED with error handling
+        # Track batch processing completion
         try:
             from api_monitor_module.utils.monitor_access import track_api_call_simple
             track_api_call_simple("batch_processing_complete", success=True, 
@@ -418,6 +417,7 @@ class MP4LooperApp:
             export_timestamp = params["export_timestamp"]
             fade_audio = params["fade_audio"]
             auto_upload = params["auto_upload"]
+            transition = params.get("transition", "None")  # Get transition parameter
             
             num_videos = distribution_settings['num_videos']
             
@@ -460,7 +460,7 @@ class MP4LooperApp:
                 
                 video_num = video_info['video_num']
                 temp_music_path = video_info['temp_music_path']
-                old_base_name = video_info['base_name']  # e.g., "Part1"
+                old_base_name = video_info['base_name']
                 
                 # Use the first file in queue for all videos, or cycle through if multiple files
                 file_index = i % len(file_paths)
@@ -471,7 +471,7 @@ class MP4LooperApp:
                 ui.update_progress(0, f"Processing video {video_num} of {num_videos}: {file_name}")
                 ui.set_current_file(i, f"Video {video_num} - {file_name}")
                 
-                # Generate output filename with actual base name
+                # Generate output filename
                 base_name = os.path.splitext(file_name)[0]
                 h, m, s = format_duration(duration)
                 time_suffix = f"{h}h" if h > 0 else ""
@@ -479,8 +479,7 @@ class MP4LooperApp:
                 time_suffix += f"{s}s" if s > 0 else ""
                 output_name = f"{base_name}_Part{video_num}_{time_suffix}.mp4"
                 
-                # FIXED: Rename song list files to match the actual video name
-                # Rename song list file
+                # Rename song list files to match the actual video name
                 old_song_list_path = video_info['song_list_path']
                 new_song_list_name = f"{base_name}_Part{video_num}_song_list.txt"
                 new_song_list_path = os.path.join(output_folder, new_song_list_name)
@@ -492,7 +491,7 @@ class MP4LooperApp:
                 except Exception as e:
                     logging.error(f"Failed to rename song list file: {e}")
                 
-                # FIXED: Rename timestamp file if it exists
+                # Rename timestamp file if it exists
                 if video_info.get('timestamp_path') and os.path.exists(video_info['timestamp_path']):
                     old_timestamp_path = video_info['timestamp_path']
                     new_timestamp_name = f"{base_name}_Part{video_num}_song_list_timestamp.txt"
@@ -504,8 +503,7 @@ class MP4LooperApp:
                     except Exception as e:
                         logging.error(f"Failed to rename timestamp file: {e}")
                 
-                # FIXED: Rename temp music and concat files to match
-                # Rename temp music file
+                # Rename temp music and concat files
                 old_temp_music_path = temp_music_path
                 new_temp_music_name = f"{base_name}_Part{video_num}_temp_music.wav"
                 new_temp_music_path = os.path.join(output_folder, new_temp_music_name)
@@ -513,7 +511,7 @@ class MP4LooperApp:
                 try:
                     if os.path.exists(old_temp_music_path):
                         os.rename(old_temp_music_path, new_temp_music_path)
-                        temp_music_path = new_temp_music_path  # Update the path for rendering
+                        temp_music_path = new_temp_music_path
                         logging.info(f"Renamed temp music: {old_temp_music_path} -> {new_temp_music_path}")
                 except Exception as e:
                     logging.error(f"Failed to rename temp music file: {e}")
@@ -530,13 +528,13 @@ class MP4LooperApp:
                     except Exception as e:
                         logging.error(f"Failed to rename concat file: {e}")
                 
-                logging.info(f"Processing video {video_num}/{num_videos}: {output_name}")
+                logging.info(f"Processing video {video_num}/{num_videos}: {output_name} with transition: {transition}")
                 logging.info(f"Using {video_info['songs_count']} unique songs, {video_info['loops']} loops")
                 
-                # Render video using the distributed temp music
+                # Render video using the distributed temp music WITH TRANSITION
                 success = self.render_video_distributed(
                     file_path, output_folder, output_name, duration, 
-                    fade_audio, ui, temp_music_path
+                    fade_audio, ui, temp_music_path, transition  # Pass transition
                 )
                 
                 if success and auto_upload:
@@ -578,116 +576,32 @@ class MP4LooperApp:
             ui.processing_complete()
 
     def render_video_distributed(self, input_file, output_folder, output_name, 
-                           duration, fade_audio, ui, temp_music_path):
+                           duration, fade_audio, ui, temp_music_path, transition="None"):
         """Render video with pre-generated distributed music"""
+        # Call the regular render_video with transition
+        # First, temporarily move the temp_music file to match expected naming
+        base_name = os.path.splitext(output_name)[0]
+        if "_" in base_name:
+            base_name = base_name.rsplit("_", 1)[0]
+        
+        expected_temp_music = os.path.join(output_folder, f"{base_name}_temp_music.wav")
+        
+        # Copy or rename temp music to expected location
+        import shutil
+        if temp_music_path != expected_temp_music:
+            shutil.copy2(temp_music_path, expected_temp_music)
+        
         try:
-            output_path = os.path.join(output_folder, output_name)
-            
-            # Check if temp music exists
-            if not os.path.exists(temp_music_path):
-                logging.error(f"Temp music file not found: {temp_music_path}")
-                return False
-            
-            # Setup ffmpeg command (same as original but with specific temp music)
-            fade_filter = []
-            if fade_audio:
-                fade_start = max(duration - 5, 0)
-                fade_filter = ["-af", f"afade=t=out:st={fade_start}:d=5"]
-            
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-y",
-                "-hwaccel", "cuda",
-                "-hwaccel_output_format", "cuda",  # Keep frames in GPU memory
-                "-stream_loop", "-1", "-i", str(input_file),
-                "-stream_loop", "-1", "-i", str(temp_music_path),
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                "-c:v", "copy",  # Copy video stream (no re-encoding)
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-t", str(duration),
-                *fade_filter,
-                "-shortest",
-                str(output_path)
-            ]
-            
-            logging.info(f"Executing FFmpeg with CUDA acceleration: {' '.join(ffmpeg_cmd)}")
-            
-            # Log GPU usage before starting
-            try:
-                gpu_result = subprocess.run(
-                    ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
-                    capture_output=True, text=True, timeout=2
-                )
-                if gpu_result.returncode == 0:
-                    gpu_usage, mem_used, mem_total = map(int, gpu_result.stdout.strip().split(","))
-                    logging.info(f"🖥 GPU Status before render: {gpu_usage}% utilization, {mem_used}/{mem_total} MB memory")
-            except Exception as e:
-                logging.debug(f"Could not check GPU status: {e}")
-            
-            # Update progress bar to 0
-            ui.update_progress(0, "Starting render...")
-            
-            # Start FFmpeg process with CREATE_NO_WINDOW flag
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = subprocess.SW_HIDE
-
-            self.current_process = subprocess.Popen(
-                ffmpeg_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                startupinfo=startupinfo,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            )
-            
-            # Track process for pause/stop functionality
-            self.process_pid = psutil.Process(self.current_process.pid)
-            
-            # Monitor progress
-            for line in iter(self.current_process.stdout.readline, ''):
-                if not self.rendering:
-                    self.process_pid.terminate()
-                    logging.info("Rendering stopped by user")
-                    return False
-                    
-                if "time=" in line:
-                    for part in line.split():
-                        if "time=" in part:
-                            timestamp = part.split("=")[1]
-                            try:
-                                h, m, s = map(float, timestamp.split(":"))
-                                current_time = h * 3600 + m * 60 + s
-                                progress = min(100, (current_time / duration) * 100)
-                                ui.update_progress(progress, f"Progress: {int(progress)}%")
-                            except Exception as e:
-                                logging.error(f"Progress update error: {e}")
-                            break
-            
-            # Wait for process to complete
-            self.current_process.wait()
-            
-            # Validate the output
-            if not os.path.exists(output_path):
-                logging.error(f"Output file not found: {output_path}")
-                return False
-                
-            # Verify the output using post_render_check
-            if not validate_render(output_path, duration):
-                logging.error("Post-render validation failed")
-                return False
-            
-            ui.update_progress(100, "Render complete")
-            
-            return True
-            
-        except Exception as e:
-            logging.error(f"Error rendering distributed video: {e}")
-            return False
+            # Use the regular render_video with transition support
+            return self.render_video(input_file, output_folder, output_name, duration, 
+                                fade_audio, ui, transition)
+        finally:
+            # Clean up the copied temp music if we created it
+            if temp_music_path != expected_temp_music and os.path.exists(expected_temp_music):
+                try:
+                    os.remove(expected_temp_music)
+                except:
+                    pass
 
     def generate_song_list(self, output_filename, duration, output_folder, music_folder, 
                        sheet_url, new_song_count, export_timestamp):
@@ -733,51 +647,85 @@ class MP4LooperApp:
             logging.error(f"Error generating song list (batch): {e}")
             return False
 
-    def render_video(self, input_file, output_folder, output_name, duration, fade_audio, ui):
-        """Render a video with the given parameters - FIXED VERSION"""
+    def render_video(self, input_file, output_folder, output_name, duration, fade_audio, ui, transition="None"):
+        """Render a video with the given parameters - WITH TRANSITIONS"""
         try:
             output_path = os.path.join(output_folder, output_name)
             
-            # FIXED: Look for the specific temp music file that matches the output name
-            # Extract base name from output_name (e.g., "0250_1h.mp4" -> "0250")
+            # Look for the specific temp music file
             base_name = os.path.splitext(output_name)[0]
             if "_" in base_name:
-                # Remove duration suffix (e.g., "0250_1h" -> "0250")
                 base_name = base_name.rsplit("_", 1)[0]
             
-            # Look for the specific temp music file for this video
             temp_music_path = os.path.join(output_folder, f"{base_name}_temp_music.wav")
             
-            logging.info(f"Looking for temp music file: {temp_music_path}")
-            
             if not os.path.exists(temp_music_path):
-                # Fallback: try the old generic name
                 temp_music_path = os.path.join(output_folder, "temp_music.wav")
-                logging.warning(f"Specific temp music not found, trying fallback: {temp_music_path}")
-                
                 if not os.path.exists(temp_music_path):
                     logging.error(f"No temp music file found for {output_name}")
-                    logging.error(f"Tried: {os.path.join(output_folder, f'{base_name}_temp_music.wav')}")
-                    logging.error(f"Tried: {temp_music_path}")
                     return False
             
             logging.info(f"Using temp music file: {temp_music_path}")
             
-            # Setup ffmpeg command
+            # Check if transition is requested and GPU is available
+            if transition != "None":
+                # Check for NVENC availability (already done in dependency check)
+                encoders_result = subprocess.run(
+                    ["ffmpeg", "-encoders"], 
+                    capture_output=True, 
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                )
+                
+                if "h264_nvenc" not in encoders_result.stdout:
+                    messagebox.showwarning(
+                        "GPU Required", 
+                        "Transitions require NVIDIA GPU encoding (NVENC).\nProcessing will continue without transitions.",
+                        parent=ui
+                    )
+                    transition = "None"
+            
+            # Apply transition if requested
+            if transition != "None":
+                # Create temp file for transition video
+                temp_transition_path = os.path.join(output_folder, f"{base_name}_transition_temp.mp4")
+                
+                logging.info(f"Applying {transition} transition...")
+                ui.update_progress(0, f"Applying {transition} transition...")
+                
+                # Apply transition using transitions_lib
+                from transitions_lib import process_video
+                try:
+                    process_video(input_file, temp_transition_path, transition, transition_duration=1.5)
+                    input_file = temp_transition_path  # Use transition video as input
+                    logging.info(f"Transition applied successfully")
+                except Exception as e:
+                    logging.error(f"Failed to apply transition: {e}")
+                    messagebox.showwarning(
+                        "Transition Failed", 
+                        f"Failed to apply {transition} transition. Continuing without transition.",
+                        parent=ui
+                    )
+                    transition = "None"
+            
+            # Setup ffmpeg command with GPU acceleration
             fade_filter = []
             if fade_audio:
                 fade_start = max(duration - 5, 0)
                 fade_filter = ["-af", f"afade=t=out:st={fade_start}:d=5"]
-                
+            
             ffmpeg_cmd = [
                 "ffmpeg",
                 "-y",
                 "-hwaccel", "cuda",
+                "-hwaccel_output_format", "cuda",
                 "-stream_loop", "-1", "-i", str(input_file),
                 "-stream_loop", "-1", "-i", str(temp_music_path),
                 "-map", "0:v:0",
                 "-map", "1:a:0",
-                "-c:v", "copy",
+                "-c:v", "h264_nvenc",  # Use GPU encoding
+                "-preset", "fast",
+                "-b:v", "8M",  # Adjust bitrate as needed
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-t", str(duration),
@@ -786,12 +734,12 @@ class MP4LooperApp:
                 str(output_path)
             ]
             
-            logging.info(f"Executing FFmpeg: {' '.join(ffmpeg_cmd)}")
+            logging.info(f"Executing FFmpeg with GPU encoding: {' '.join(ffmpeg_cmd)}")
             
-            # Update progress bar to 0
-            ui.update_progress(0, "Starting render...")
+            # Update progress bar
+            ui.update_progress(0, "Starting render with GPU...")
             
-            # Start FFmpeg process with CREATE_NO_WINDOW flag
+            # Start FFmpeg process
             startupinfo = None
             if sys.platform == "win32":
                 startupinfo = subprocess.STARTUPINFO()
@@ -807,7 +755,7 @@ class MP4LooperApp:
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             )
             
-            # Track process for pause/stop functionality
+            # Track process
             self.process_pid = psutil.Process(self.current_process.pid)
             
             # Monitor progress
@@ -833,22 +781,30 @@ class MP4LooperApp:
             # Wait for process to complete
             self.current_process.wait()
             
+            # Clean up transition temp file if it exists
+            if transition != "None" and os.path.exists(temp_transition_path):
+                try:
+                    os.remove(temp_transition_path)
+                    logging.info("Cleaned up transition temp file")
+                except Exception as e:
+                    logging.error(f"Failed to clean up transition temp: {e}")
+            
             # Validate the output
             if not os.path.exists(output_path):
                 logging.error(f"Output file not found: {output_path}")
                 return False
                 
-            # Verify the output using post_render_check
+            # Verify the output
             if not validate_render(output_path, duration):
                 logging.error("Post-render validation failed")
                 return False
                 
-            # Clean up temp files (UPDATED: Clean specific files for this video)
+            # Clean up temp files
             temp_files_to_clean = [
                 f"{base_name}_temp_music.wav",
                 f"{base_name}_music_concat.txt",
-                "temp_music.wav",  # Clean old generic file too if it exists
-                "music_concat.txt"  # Clean old generic file too if it exists
+                "temp_music.wav",
+                "music_concat.txt"
             ]
             
             for temp_file in temp_files_to_clean:
