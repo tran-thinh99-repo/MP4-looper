@@ -1,0 +1,146 @@
+# MP4 Looper - Python Dependencies
+# Core application requirements for development and runtime
+
+# ===== GUI Framework =====
+customtkinter>=5.2.0
+tkinter-dnd2>=0.3.0
+
+# ===== Google API Dependencies =====
+google-auth>=2.17.0
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.88.0
+gspread>=5.9.0
+
+# ===== Authentication & Security =====
+cryptography>=40.0.0
+
+# ===== HTTP & Web =====
+requests>=2.31.0
+urllib3>=1.26.0
+
+# ===== Environment & Configuration =====
+python-dotenv>=1.0.0
+
+# ===== System & Process Management =====
+psutil>=5.9.0
+
+# ===== File Processing =====
+pathlib2>=2.3.7; python_version<"3.4"
+
+# ===== Data Processing =====
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# ===== Audio/Video Processing (Python bindings) =====
+# Note: FFmpeg binaries are bundled separately
+ffmpeg-python>=0.2.0
+
+# ===== Development Dependencies =====
+# Uncomment for development environment
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
+# black>=23.0.0
+# flake8>=6.0.0
+# mypy>=1.0.0
+
+# ===== Build Dependencies =====
+# Required for building executable
+pyinstaller>=5.10.0
+
+# ===== Platform-specific Dependencies =====
+# Windows-specific
+pywin32>=306; sys_platform=="win32"
+wmi>=1.5.1; sys_platform=="win32"
+
+# ===== Optional Dependencies =====
+# For enhanced error reporting
+sentry-sdk>=1.25.0
+
+# For advanced logging
+colorlog>=6.7.0
+
+# For progress bars in CLI
+tqdm>=4.65.0
+
+# ===== Version Pinning for Stability =====
+# Critical dependencies with specific versions for stability
+google-auth-httplib2>=0.1.0
+google-api-core>=2.11.0
+cachetools>=5.3.0
+
+# ===== Additional Utility Libraries =====
+# For better date/time handling
+python-dateutil>=2.8.0
+
+# For improved JSON handling
+ujson>=5.7.0
+
+# For better file path handling
+pathspec>=0.11.0
+
+# ===== Network & SSL =====
+certifi>=2023.5.7
+charset-normalizer>=3.1.0
+idna>=3.4
+
+# ===== Compatibility =====
+# Ensure compatibility across Python versions
+importlib-metadata>=6.6.0; python_version<"3.8"
+typing-extensions>=4.5.0; python_version<"3.8"
+
+# ===== Optional Performance Enhancements =====
+# Uncomment for better performance (optional)
+# numpy>=1.24.0
+# Pillow>=9.5.0
+
+# ===== Development Tools (Optional) =====
+# Uncomment for development environment
+# pre-commit>=3.3.0
+# autopep8>=2.0.0
+# bandit>=1.7.0
+# safety>=2.3.0
+
+# ===== Documentation Dependencies (Optional) =====
+# Uncomment for documentation generation
+# sphinx>=7.0.0
+# sphinx-rtd-theme>=1.2.0
+# myst-parser>=2.0.0
+
+# ===== API Monitoring Dependencies =====
+# For the monitoring module functionality
+sqlite3; python_version>="3.0"  # Usually built-in
+json5>=0.9.0
+
+# ===== File Format Support =====
+# Additional file format support
+chardet>=5.1.0
+
+# ===== Async Support (if needed) =====
+# Uncomment if async functionality is added
+# aiohttp>=3.8.0
+# asyncio>=3.4.3; python_version<"3.7"
+
+# ===== Memory Management =====
+# For better memory handling with large files
+pympler>=0.9
+
+# ===== Error Tracking =====
+# For better error reporting and debugging
+traceback2>=1.4.0; python_version<"3.0"
+
+# ===== Configuration Management =====
+# For advanced configuration handling
+configparser>=5.3.0; python_version<"3.0"
+pyyaml>=6.0
+
+# ===== Final Notes =====
+# 1. FFmpeg binaries must be provided separately (bundled with application)
+# 2. Some dependencies may require system-level libraries
+# 3. For production builds, consider freezing exact versions
+# 4. GPU acceleration requires NVIDIA drivers (not Python packages)
+# 5. Google API credentials file must be provided separately
+
+# ===== Version Information =====
+# Generated for MP4 Looper v1.2.0
+# Compatible with Python 3.8+
+# Last updated: December 2024

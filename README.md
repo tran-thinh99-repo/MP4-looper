@@ -1,132 +1,286 @@
 # MP4 Looper
 
-A batch processing utility for creating extended video loops with background music.
+A powerful desktop application for creating extended-duration videos by combining MP4 video files with synchronized background music. Perfect for content creators, streamers, and anyone needing long-form ambient videos.
 
-![MP4 Looper Icon](mp4_looper_icon.png)
+## ✨ Features
 
-## Overview
+### Core Functionality
+- **Video Looping**: Seamlessly loop MP4 videos for any duration
+- **Music Integration**: Automatically sync background music from WAV files
+- **Batch Processing**: Process multiple videos simultaneously
+- **Duration Control**: Create videos from minutes to hours in length
+- **Audio Fading**: Optional audio fade-out effects
 
-MP4 Looper is a Windows application that creates extended versions of MP4 video files, seamlessly looped with background music. It's perfect for creating long-duration meditation, relaxation, or ambient videos.
+### Advanced Features
+- **Song Distribution**: Create multiple videos with different song combinations
+- **Google Sheets Integration**: Manage music playlists via Google Sheets
+- **Hardware Acceleration**: CUDA/NVENC support for faster processing
+- **Progress Monitoring**: Real-time processing progress and status
+- **File Management**: Built-in tools for organizing outputs
 
-### Key Features
+### User Experience
+- **Drag & Drop Interface**: Intuitive file handling
+- **Multi-language Support**: English and Vietnamese interfaces
+- **Dark Theme**: Modern, eye-friendly interface
+- **Help System**: Comprehensive built-in documentation
+- **Error Recovery**: Robust error handling and recovery
 
-- **Batch Processing**: Process multiple video files in a single operation
-- **Music Integration**: Add background music from an organized library
-- **Duration Control**: Create loops of specific durations (1 hour, 3 hours, 11 hours, etc.)
-- **Audio Fading**: Optional fade-out effect for smooth audio endings
-- **Google Sheet Integration**: Pull music information from a Google Sheet
-- **Google Drive Upload**: Automatically upload completed videos to Google Drive
-- **Timestamp Generation**: Create timestamps for the background music
+## 🔧 System Requirements
 
-## Requirements
+### Minimum Requirements
+- **OS**: Windows 10 64-bit or later
+- **RAM**: 4 GB (8 GB recommended)
+- **Storage**: 2 GB free space for installation
+- **Additional Storage**: Varies based on video output sizes
 
-- Windows 10/11
-- FFmpeg (automatically installed if not present)
-- NVIDIA GPU (recommended for hardware acceleration)
-- Internet connection (for Google Sheet/Drive features)
+### Recommended Requirements
+- **OS**: Windows 11 64-bit
+- **RAM**: 16 GB or more
+- **GPU**: NVIDIA graphics card with CUDA support
+- **Storage**: SSD with 50+ GB free space
+- **Internet**: For Google Sheets integration and updates
 
-## Installation
+### Dependencies (Bundled)
+- **FFmpeg**: Video processing engine
+- **Python Runtime**: Application runtime (embedded)
+- **Audio Codecs**: WAV processing support
 
-1. Download the latest release from the [Releases](https://github.com/tran-thinh99-repo/mp4-looper/releases) page
-2. Extract the ZIP file to a location of your choice
-3. Run `MP4 Looper.exe` to start the application
+## 📥 Installation
 
-## Usage
+### For End Users
+1. **Download**: Get the latest release from the releases page
+2. **Extract**: Unzip the downloaded file to your preferred location
+3. **Run**: Double-click `MP4 Looper.exe` to start
+4. **Setup**: Follow the first-time setup wizard
 
-### Basic Workflow
+### For Developers
+```bash
+# Clone the repository
+git clone https://github.com/tran-thinh99-repo/mp4-looper.git
+cd mp4-looper
 
-1. **Drag and drop** MP4 files or folders into the application
-2. Set the desired **loop duration** in seconds or use the preset buttons
-3. Configure **output folder** and **music folder** locations
-4. Enter your **Google Sheet URL** containing music data
-5. Click **Start Processing** to begin rendering
+# Install dependencies
+pip install -r requirements.txt
+
+# Run from source
+python mp4_looper.py
+```
+
+## 🚀 Quick Start Guide
+
+### 1. Initial Setup
+- Launch MP4 Looper
+- Sign in with your credentials
+- Configure output and music folder paths
+- Set up your Google Sheets playlist (optional)
+
+### 2. Prepare Your Files
+- **Video Files**: Place MP4 files in an accessible folder
+- **Music Files**: Organize WAV files in your music folder
+- **Playlist**: Create a Google Sheet with your song list
+
+### 3. Create Your First Video
+1. Drag MP4 files into the application
+2. Set desired video duration (in seconds)
+3. Configure music and audio settings
+4. Click "Start Processing"
+5. Monitor progress and wait for completion
+
+### 4. Find Your Output
+- Processed videos appear in your configured output folder
+- Look for files named like: `VideoName_1h.mp4`
+- Additional files include song lists and timestamps
+
+## 📋 File Organization
 
 ### Input Files
-
-MP4 Looper accepts:
-- Individual `.mp4` files
-- Folders containing `.mp4` files
-
-### Configuration Options
-
-- **Output Folder**: Where the processed videos and metadata are saved
-- **Music Folder**: Location of the WAV files for background music
-- **Google Sheet URL**: Link to the sheet containing music information
-- **Loop Duration**: Length of the output video in seconds
-- **Audio Fade**: Toggle for fading audio at the end
-- **Export Timestamp**: Generate timestamp files for music
-- **Auto-Upload**: Automatically upload to Google Drive after processing
-
-## Google Sheet Format
-
-The application expects a Google Sheet with the following structure:
-- Column A: Song ID (numeric)
-- Column B: Song Name
-- Column C: Combined ID_Name
-- Column E: Week information (date)
-
-Example:
 ```
-A,B,C,D,E
-430,Slow Down,430_Slow Down,,05/07/2024
-431,Perfect Day,431_Perfect Day,,05/07/2024
+📁 Your Folders/
+├── 📁 Videos/
+│   ├── video1.mp4
+│   ├── video2.mp4
+│   └── video3.mp4
+├── 📁 Music/
+│   ├── Song1.wav
+│   ├── Song2.wav
+│   └── Song3.wav
 ```
 
-## Troubleshooting
+### Output Files
+```
+📁 Output Folder/
+├── video1_1h.mp4              # Main output video
+├── video1_song_list.txt       # Songs used
+├── video1_song_list_timestamp.txt  # Timing info
+└── (temporary processing files - auto-deleted)
+```
 
-- **Missing FFmpeg**: The application will attempt to download and install FFmpeg if missing
-- **NVIDIA Driver Issues**: Update to the latest NVIDIA drivers
-- **Sheet Access Problems**: Ensure the Google Sheet is publicly accessible or shared with the service account
-- **WAV Files Missing**: Verify that the music folder contains the WAV files referenced in the sheet
+### Google Sheets Format
+| A (Number) | B (Song Name) | C (Combined) | D | E (Week) |
+|------------|---------------|--------------|---|----------|
+| 1          | Amazing       | 1_Amazing    |   | 01/15/2024 |
+| 2          | Wonderful     | 2_Wonderful  |   | 01/15/2024 |
+| 3          | Beautiful     | 3_Beautiful  |   | 01/22/2024 |
 
-## Development
+## ⚙️ Configuration
 
-### Prerequisites
+### Basic Settings
+- **Output Folder**: Where finished videos are saved
+- **Music Folder**: Location of WAV music files
+- **Duration**: Video length in seconds (3600 = 1 hour)
+- **Song Count**: Number of songs to include
 
-- Python 3.8+
-- Required Python packages:
-  ```
-  pip install customtkinter tkinterdnd2 pillow google-api-python-client google-auth-oauthlib gspread psutil
-  ```
+### Advanced Options
+- **Fade Audio**: Gradually reduce volume at video end
+- **Export Timestamps**: Create timing information files
+- **Hardware Acceleration**: Use GPU for faster processing
+- **Auto-upload**: Automatically upload finished videos (admin only)
 
-### Building from Source
+### Google Sheets Integration
+1. Create a Google Sheet with the required column format
+2. Share the sheet publicly or with the service account
+3. Copy the sheet URL into the application
+4. Ensure WAV filenames match sheet entries exactly
 
-1. Clone the repository:
-   ```
-   git clone https://github.com/tran-thinh99-repo/mp4-looper.git
-   ```
+## 🛠️ Troubleshooting
 
-2. Navigate to the project directory:
-   ```
-   cd mp4-looper
-   ```
+### Common Issues
 
-3. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
+**"Missing WAV files" Error**
+- Check that your Music Folder path is correct
+- Verify WAV file names match your Google Sheet exactly
+- Ensure files are actually in WAV format
 
-4. Run the application:
-   ```
-   python mp4_looper.py
-   ```
+**Slow Processing**
+- Close other applications to free up system resources
+- Use an SSD for faster file access
+- Enable hardware acceleration if available
+- Process fewer files simultaneously
 
-5. Build executable (optional):
-   ```
-   build_mp4_looper.bat
-   ```
+**Authentication Problems**
+- Verify your login credentials
+- Check internet connection for Google Sheets access
+- Contact your administrator for access issues
 
-## Credits
+**"Failed to generate song list"**
+- Confirm Google Sheet URL is correct
+- Check that the sheet is publicly accessible
+- Verify the sheet follows the required column format
 
-- FFmpeg for video processing: [https://ffmpeg.org/](https://ffmpeg.org/)
-- customtkinter for the modern UI: [https://github.com/TomSchimansky/CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)
-- tkinterdnd2 for drag and drop functionality: [https://github.com/pmgagne/tkinterdnd2](https://github.com/pmgagne/tkinterdnd2)
+### Performance Optimization
+- **Hardware**: Use NVIDIA GPU with recent drivers
+- **Storage**: Store files on SSD drives when possible
+- **Memory**: Close unnecessary applications during processing
+- **Network**: Stable internet for Google Sheets access
 
-## License
+### Getting Support
+1. Use the built-in "Send Debug Info" feature
+2. Check the application logs via "View Log" utility
+3. Include specific error messages when reporting issues
+4. Describe the steps that led to the problem
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+## 🔒 Privacy & Security
 
-## Contact
+### Data Handling
+- **Local Processing**: All video processing happens on your computer
+- **No Cloud Storage**: Videos are not automatically stored online
+- **Optional Upload**: Upload features require explicit user action
+- **Secure Authentication**: Login credentials are encrypted
 
-For support or feature requests, please contact:
-- GitHub: [tran-thinh99-repo](https://github.com/tran-thinh99-repo)
+### File Access
+- Application only accesses folders you specifically configure
+- No automatic scanning of your computer
+- Temporary files are automatically cleaned up
+- Original files are never modified
+
+### Network Activity
+- **Google Sheets**: Optional feature for playlist management
+- **Updates**: Periodic checks for application updates
+- **Authentication**: Secure login verification
+- **Debug Info**: Only sent when explicitly requested by user
+
+## 📝 Version History
+
+### v1.2.0 (Current)
+- Added song distribution mode for multiple video variants
+- Improved hardware acceleration support
+- Enhanced error handling and recovery
+- Updated user interface with better feedback
+- Added comprehensive help system
+
+### v1.1.0
+- Added Google Sheets integration
+- Implemented batch processing
+- Added drag & drop file handling
+- Improved audio processing quality
+
+### v1.0.0
+- Initial release
+- Basic video looping functionality
+- Simple audio overlay
+- Manual file selection
+
+## 🤝 Contributing
+
+### For Developers
+- **Language**: Python 3.8+
+- **UI Framework**: CustomTkinter
+- **Video Processing**: FFmpeg
+- **Build System**: PyInstaller
+
+### Development Setup
+```bash
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Run tests
+python -m pytest tests/
+
+# Build executable
+python build_mp4_looper.bat
+```
+
+### Code Style
+- Follow PEP 8 guidelines
+- Use type hints where applicable
+- Include docstrings for all functions
+- Write unit tests for new features
+
+## 📄 License
+
+This project is proprietary software. All rights reserved.
+
+### Usage Terms
+- Licensed for use by authorized users only
+- Commercial use requires separate licensing
+- Redistribution is not permitted without authorization
+- Source code access is limited to authorized developers
+
+### Third-Party Components
+- **FFmpeg**: GPL/LGPL licensed components
+- **Python**: PSF licensed runtime
+- **CustomTkinter**: MIT licensed UI framework
+- Various other open-source components (see full attribution in NOTICES)
+
+## 📞 Support
+
+### Documentation
+- **Built-in Help**: Press F1 or use Help menu
+- **User Guide**: Available in English and Vietnamese
+- **Video Tutorials**: Check the documentation folder
+
+### Technical Support
+- **Debug Information**: Use "Send Debug Info" feature
+- **Log Files**: Available via "View Log" utility
+- **System Information**: Included in debug reports
+
+### Contact Information
+- **Application Issues**: Use built-in support features
+- **Feature Requests**: Contact through official channels
+- **Business Inquiries**: Use designated business contacts
+
+---
+
+**MP4 Looper** - Professional video processing made simple.
+
+*For the latest updates and information, check the application's built-in update system.*
