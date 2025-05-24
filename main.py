@@ -30,15 +30,12 @@ from settings_manager import get_settings
 class MP4LooperApp:
     def __init__(self):
         setup_logging()
-        load_environment_variables()  # Remove load_dotenv() - load_environment_variables() handles it
+        load_environment_variables()
         check_dependencies()
+        
         # Initialize settings manager EARLY
         self.settings_manager = get_settings()
-
-        # Check environment variables and log their status
         check_environment_vars()
-        
-        # Initialize this attribute to track initialization status
         self.initialized = False
         
         # Check authentication - ONLY use handle_authentication()
@@ -46,48 +43,9 @@ class MP4LooperApp:
             logging.warning("Authentication failed or cancelled. Exiting application.")
             sys.exit(0)
 
-        # FIXED: Initialize API monitoring with proper error handling
-        try:
-            # Import with fallback handling
-            try:
-                from api_monitor_module import setup_monitoring
-                
-                self.api_monitor = setup_monitoring(
-                    app_name="MP4 Looper",
-                    admin_emails=["admin@vicgmail.com"],
-                    auto_cleanup=True
-                )
-                logging.info("✅ API monitoring initialized")
-                
-                # Set up global reference for monitor_access
-                import api_monitor_module.utils.monitor_access as monitor_access
-                monitor_access._api_monitor_cache = self.api_monitor
-                monitor_access._cache_checked = False  # Reset the cache check
-                
-                # Test the monitoring system
-                stats = self.api_monitor.get_stats_summary()
-                logging.info(f"✅ API monitoring active - Total calls: {stats['overview']['total_calls_ever']}")
-                
-            except ImportError as import_err:
-                logging.warning(f"API monitoring module not available: {import_err}")
-                self.api_monitor = self._create_dummy_monitor()
-                
-            except Exception as setup_err:
-                logging.warning(f"API monitoring setup failed: {setup_err}")
-                self.api_monitor = self._create_dummy_monitor()
-                
-        except Exception as e:
-            logging.error(f"❌ Critical error in API monitoring setup: {e}")
-            self.api_monitor = self._create_dummy_monitor()
-            
-        # Set the cache reference even for dummy monitor
-        try:
-            import api_monitor_module.utils.monitor_access as monitor_access
-            monitor_access._api_monitor_cache = self.api_monitor
-            monitor_access._cache_checked = False
-        except:
-            pass
-
+        # FIXED: Only initialize monitoring for admin users
+        self.api_monitor = self._initialize_monitoring_if_admin()
+        
         import gc
         gc.collect()
         
@@ -114,7 +72,6 @@ class MP4LooperApp:
         ).check_and_notify(self.ui))
 
         set_window_icon(self.ui)
-
         disable_cmd_edit_mode()
 
         # State variables
@@ -132,11 +89,62 @@ class MP4LooperApp:
         # Mark as successfully initialized
         self.initialized = True
 
+    def _initialize_monitoring_if_admin(self):
+        """Initialize monitoring only for admin users"""
+        try:
+            # Check if current user is admin BEFORE creating monitoring
+            from auth_module.email_auth import get_current_user
+            current_user = get_current_user()
+            
+            # List of admin emails
+            admin_emails = ["admin@vicgmail.com"]
+            
+            if current_user and current_user in admin_emails:
+                logging.info(f"🔧 Admin user detected: {current_user} - Initializing full monitoring")
+                
+                try:
+                    from api_monitor_module import setup_monitoring
+                    
+                    api_monitor = setup_monitoring(
+                        app_name="MP4 Looper",
+                        admin_emails=admin_emails,
+                        auto_cleanup=True
+                    )
+                    
+                    # Set up global reference for monitor_access
+                    import api_monitor_module.utils.monitor_access as monitor_access
+                    monitor_access._api_monitor_cache = api_monitor
+                    monitor_access._cache_checked = False
+                    
+                    # Test the monitoring system
+                    stats = api_monitor.get_stats_summary()
+                    logging.info(f"✅ Admin monitoring active - Total calls: {stats['overview']['total_calls_ever']}")
+                    
+                    return api_monitor
+                    
+                except ImportError as import_err:
+                    logging.info(f"API monitoring module not available: {import_err}")
+                    return self._create_dummy_monitor()
+                    
+                except Exception as setup_err:
+                    logging.warning(f"API monitoring setup failed: {setup_err}")
+                    return self._create_dummy_monitor()
+            else:
+                logging.info(f"👤 Regular user: {current_user} - Using lightweight monitoring")
+                return self._create_dummy_monitor()
+                
+        except Exception as e:
+            logging.error(f"❌ Error checking admin status: {e}")
+            return self._create_dummy_monitor()
+
     def _create_dummy_monitor(self):
-        """Create a dummy monitor object that won't cause crashes"""
+        """Create a lightweight dummy monitor that doesn't create files"""
         class DummyMonitor:
+            def __init__(self):
+                # No file creation, no storage, just basic functionality
+                pass
+                
             def is_admin_user(self, email=None): 
-                # Check against admin emails directly
                 if email is None:
                     try:
                         from auth_module.email_auth import get_current_user
@@ -150,25 +158,24 @@ class MP4LooperApp:
                 return {'overview': {'total_calls_ever': 0}}
             
             def record_custom_metric(self, *args, **kwargs):
-                pass
+                pass  # Do nothing - no tracking for non-admins
             
             def export_data(self, *args, **kwargs):
                 return None
             
             def cleanup_old_data(self):
-                pass
+                pass  # No data to clean
                 
             def show_dashboard(self, parent_window=None):
                 from tkinter import messagebox
                 messagebox.showinfo(
                     "Dashboard Unavailable", 
-                    "The monitoring dashboard is not available.\n\n"
-                    "This may be due to missing Python dependencies.\n"
-                    "The application will continue to work normally.",
+                    "The monitoring dashboard is only available to administrators.\n\n"
+                    "Contact your system administrator for access.",
                     parent=parent_window
                 )
         
-        logging.info("✅ Dummy API monitor created - application will work without monitoring")
+        logging.info("✅ Lightweight monitoring created - no file storage for regular users")
         return DummyMonitor()
     
     def apply_saved_settings(self):

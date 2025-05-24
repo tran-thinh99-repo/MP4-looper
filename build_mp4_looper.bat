@@ -32,7 +32,7 @@ pyinstaller ^
   --add-data ".env;." ^
   --add-binary "..\\ffmpeg\\ffmpeg.exe;." ^
   --add-binary "..\\ffmpeg\\ffprobe.exe;." ^
-  mp4_looper.py
+  main.py
 
 echo.
 echo ✅ Build complete! Check the "MP4 Looper build" folder.

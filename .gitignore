@@ -60,3 +60,4 @@ git_init.bat
 
 *.enc
 looper_settings.json.backup
+admin.py
