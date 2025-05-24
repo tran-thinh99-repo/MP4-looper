@@ -32,7 +32,6 @@ def validate_csv_rows(csv_lines):
         if not b:
             continue
         expected = f"{a}_{b}".strip()
-        logging.debug(f"[CHECK] A='{a}', B='{b}', C='{c}', Expected='{expected}'")
         if c != expected:
             mismatches.append((a, b, c, expected))
     return mismatches
@@ -68,7 +67,7 @@ class SongListGenerator:
             
             if self.sheets_service:
                 track_api_call_simple("sheets_song_connect", success=True)
-                logging.info("📊 Google Sheets connection established for batch processing")
+                logging.info("📊 Google Sheets connection established")
             else:
                 track_api_call_simple("sheets_song_connect", success=False, 
                                     error_message="Failed to get Sheets service")
@@ -79,7 +78,7 @@ class SongListGenerator:
         """Load song data from sheet (cached for batch processing)"""
         # Check if we already have this data cached
         if sheet_url == self.last_sheet_url and sheet_url in self.cached_song_data:
-            logging.info("📊 Using cached song data (no API call needed)")
+            logging.info("📊 Using cached song data")
             return self.cached_song_data[sheet_url]
         
         # Extract sheet ID and gid
@@ -134,7 +133,7 @@ class SongListGenerator:
                 self.cached_song_data[sheet_url] = rows
                 self.last_sheet_url = sheet_url
                 
-                logging.info(f"📊 Loaded and cached {len(rows)} rows from Google Sheet")
+                logging.info(f"📊 Loaded {len(rows)} rows from Google Sheet")
             except Exception as e:
                 track_api_call_simple("sheets_song_read", success=False, error_message=str(e))
                 raise
@@ -145,10 +144,7 @@ class SongListGenerator:
                                          music_folder, output_folder, new_song_count=5, 
                                          export_song_list=True, export_timestamp=True):
         """Generate song list with batch optimization (reuses sheet data)"""
-        from api_monitor_module.utils.monitor_access import track_api_call_simple
-        
         try:
-            
             # Ensure connection (only connects once per batch)
             self._ensure_connection()
             
@@ -163,23 +159,22 @@ class SongListGenerator:
             
         except Exception as e:
             track_api_call_simple("song_list_generation_batch", success=False, error_message=str(e))
-            logging.error(f"❌ Failed to generate song list (batch): {e}")
+            logging.error(f"❌ Failed to generate song list: {e}")
             return None
     
     def _process_existing_data(self, rows, output_filename, duration_in_seconds, 
-                              music_folder, output_folder, new_song_count=5, 
-                              export_song_list=True, export_timestamp=True):
-        """Process pre-loaded song data using the same logic as the original function"""
+                      music_folder, output_folder, new_song_count=5, 
+                      export_song_list=True, export_timestamp=True):
+        """Process pre-loaded song data - CLEANED UP VERSION"""
         
-        # This copies the exact same processing logic from your original function
-        # but works with pre-loaded data instead of making new API calls
+        logging.info(f"🎵 Processing {output_filename} - {duration_in_seconds}s duration, {new_song_count} new songs")
         
         songs_raw = []
         weeks_raw = []
         last_week = ""
         
-        # Skip header row - same logic as original
-        for row in rows[1:]:
+        # Parse song data from sheet rows
+        for i, row in enumerate(rows[1:], 2):  # Start from row 2 (skip header)
             if len(row) < 2:
                 continue
                 
@@ -188,25 +183,22 @@ class SongListGenerator:
             
             if a.isdigit() and b:
                 song = f"{a}_{b}"
-            else:
-                song = ""
-
-            week = row[4].strip() if len(row) > 4 else ""
-
-            if not week and last_week:
-                week = last_week
-            elif week:
-                last_week = week
-            
-            if (song and "_" in song and song.split("_")[0].isdigit()):
                 songs_raw.append(song)
+                
+                week = row[4].strip() if len(row) > 4 else ""
+                if not week and last_week:
+                    week = last_week
+                elif week:
+                    last_week = week
                 weeks_raw.append(week)
         
+        logging.info(f"📊 Found {len(songs_raw)} valid songs from sheet")
+        
         if not weeks_raw or not songs_raw:
-            logging.error("No valid data available to generate song list.")
+            logging.error("❌ No valid data available to generate song list.")
             return None
 
-        # Continue with the same logic as the original function...
+        # Process weeks and select songs
         week_dict = {}
         last_week = None
         for i, song in enumerate(songs_raw):
@@ -219,94 +211,158 @@ class SongListGenerator:
                 last_week = week
                 week_dict.setdefault(week, []).append(song)
 
+        logging.info(f"📅 Found {len(week_dict)} unique weeks")
+
         sorted_weeks = sorted(week_dict.keys(), key=lambda x: datetime.strptime(x, "%d/%m/%Y"))
         newest_week = sorted_weeks[-1]
         old_weeks = sorted_weeks[:-1]
+        
+        logging.info(f"📆 Newest week: {newest_week} ({len(week_dict.get(newest_week, []))} songs)")
 
         selected_songs = []
         used_songs = set()
         missing_files = []
 
-        # Select newest week
+        # Select newest week songs
         new_week_songs = week_dict.get(newest_week, []).copy()
         random.shuffle(new_week_songs)
         selected_songs += new_week_songs[:new_song_count]
         used_songs.update(selected_songs)
+        
+        logging.info(f"🎵 Selected {len(selected_songs)} songs from newest week")
 
         base_dir = output_folder or get_base_path()
         list_path = os.path.join(base_dir, output_filename)
 
-        # Fill up duration (same logic as original)
+        # Fill up duration by checking song files and adding more if needed
         total_duration = 0
+        
         if duration_in_seconds and music_folder:
-            def try_add(song):
+            # Check selected songs and get their durations
+            for song in selected_songs:
                 song = unicodedata.normalize("NFC", song)
                 path = os.path.join(music_folder, f"{song}.wav")
+                
                 if not os.path.isfile(path):
                     missing_files.append(f"{song}.wav")
-                    return 0
-                return get_wav_duration(path)
+                else:
+                    duration = get_wav_duration(path)
+                    total_duration += duration
 
-            for song in selected_songs:
-                total_duration += try_add(song)
-
+            # Add more songs if needed
             if total_duration < duration_in_seconds:
+                logging.info(f"⏱️ Need more songs ({total_duration}s < {duration_in_seconds}s), adding from older weeks...")
                 old_song_pool = [s for w in reversed(old_weeks) for s in week_dict[w]]
                 random.shuffle(old_song_pool)
 
                 for song in old_song_pool:
                     if song in used_songs:
                         continue
-                    dur = try_add(song)
+                        
+                    song_norm = unicodedata.normalize("NFC", song)
+                    path = os.path.join(music_folder, f"{song_norm}.wav")
+                    
+                    if not os.path.isfile(path):
+                        missing_files.append(f"{song}.wav")
+                        continue
+                        
+                    dur = get_wav_duration(path)
                     if dur:
                         selected_songs.append(song)
                         used_songs.add(song)
                         total_duration += dur
                         if total_duration >= duration_in_seconds:
                             break
+            
+            logging.info(f"✅ Final selection: {len(selected_songs)} songs, {total_duration}s total")
 
         if missing_files:
-            logging.warning(f"⚠️ Missing {len(missing_files)} WAV files: {missing_files}")
+            logging.error(f"❌ Missing {len(missing_files)} WAV files")
             return ("missing", sorted(set(missing_files)))
 
-        # Export list (same as original)
+        # Export song list
         if export_song_list:
-            with open(list_path, "w", encoding="utf-8") as f:
-                for song in selected_songs:
-                    f.write(song + "\n")
+            try:
+                with open(list_path, "w", encoding="utf-8") as f:
+                    for song in selected_songs:
+                        f.write(song + "\n")
+                logging.info("💾 Song list saved")
+            except Exception as e:
+                logging.error(f"❌ Failed to save song list: {e}")
+                return None
 
-        # Export timestamp (same as original)
+        # Export timestamp files
         if export_timestamp:
-            base_path = os.path.splitext(list_path)[0].replace("_song_list", "")
-            timestamp_path = base_path + "_song_list_timestamp.txt"
-            timestamp_full_path = base_path + "_song_list_timestamp_full.txt"
+            # Extract base name from output_filename, preserving any suffix
+            if output_filename.endswith("_song_list.txt"):
+                base_name = output_filename.replace("_song_list.txt", "")
+            else:
+                base_name = os.path.splitext(output_filename)[0].replace("_song_list", "")
+            
+            timestamp_path = os.path.join(output_folder, f"{base_name}_song_list_timestamp.txt")
+            timestamp_full_path = os.path.join(output_folder, f"{base_name}_song_list_timestamp_full.txt")
 
-            with open(timestamp_path, "w", encoding="utf-8") as f_stripped, \
-                open(timestamp_full_path, "w", encoding="utf-8") as f_full:
+            try:
+                with open(timestamp_path, "w", encoding="utf-8") as f_stripped, \
+                    open(timestamp_full_path, "w", encoding="utf-8") as f_full:
 
-                current_time = 0
+                    current_time = 0
+                    for song in selected_songs:
+                        song = unicodedata.normalize("NFC", song)
+                        path = os.path.join(music_folder, f"{song}.wav")
+
+                        if not os.path.isfile(path):
+                            continue
+
+                        # Format timestamp
+                        h, m, s = format_duration(int(current_time))
+                        timestamp = f"{h:02d}:{m:02d}:{s:02d}"
+                        
+                        # Split song name for clean titles
+                        if '_' in song:
+                            song_title_only = song.split('_', 1)[1]
+                        else:
+                            song_title_only = song
+                            
+                        f_stripped.write(f"{timestamp} {song_title_only}\n")
+                        f_full.write(f"{timestamp} {song}\n")
+                        
+                        # Get duration for next timestamp
+                        duration = get_wav_duration(path)
+                        current_time += duration
+                
+                logging.info("📝 Timestamp files created")
+                
+            except Exception as e:
+                logging.error(f"❌ Failed to create timestamp files: {e}")
+
+        # Create temp music file
+        if output_filename.endswith("_song_list.txt"):
+            base_name = output_filename.replace("_song_list.txt", "")
+        else:
+            base_name = os.path.splitext(output_filename)[0].replace("_song_list", "")
+        
+        concat_file_path = os.path.join(output_folder, f"{base_name}_music_concat.txt")
+        temp_music_path = os.path.join(output_folder, f"{base_name}_temp_music.wav")
+        
+        # Create concat file
+        try:
+            with open(concat_file_path, "w", encoding="utf-8") as f:
                 for song in selected_songs:
                     song = unicodedata.normalize("NFC", song)
-                    path = os.path.join(music_folder, f"{song}.wav")
+                    wav_path = os.path.join(music_folder, f"{song}.wav")
+                    if os.path.isfile(wav_path):
+                        # Convert backslashes to forward slashes for FFmpeg
+                        ffmpeg_path = wav_path.replace('\\', '/')
+                        f.write(f"file '{ffmpeg_path}'\n")
+            
+            logging.info("📝 Concat file created")
+            
+        except Exception as e:
+            logging.error(f"❌ Failed to create concat file: {e}")
+            return False
 
-                    if not os.path.isfile(path):
-                        continue
-
-                    timestamp = format_duration(current_time)
-                    f_stripped.write(f"{timestamp} {song.split('_', 1)[-1]}\n")
-                    f_full.write(f"{timestamp} {song}\n")
-                    current_time += get_wav_duration(path)
-
-        # Create temp_music.wav file (same as original)
-        concat_file_path = os.path.join(output_folder, "music_concat.txt")
-        with open(concat_file_path, "w", encoding="utf-8") as f:
-            for song in selected_songs:
-                song = unicodedata.normalize("NFC", song)
-                wav_path = os.path.join(music_folder, f"{song}.wav")
-                if os.path.isfile(wav_path):
-                    f.write(f"file '{wav_path.replace('\\', '/')}'\n")
-
-        temp_music_path = os.path.join(output_folder, "temp_music.wav")
+        # Create temp music file with FFmpeg
         try:
             extra_args = {}
             if sys.platform == "win32":
@@ -326,22 +382,26 @@ class SongListGenerator:
             )
             
             if result.returncode != 0:
-                logging.error(f"❌ FFMPEG Error: {result.stderr}")
+                logging.error(f"❌ FFmpeg failed: {result.stderr}")
                 return False
             
             if not os.path.exists(temp_music_path):
-                logging.error(f"❌ Failed to create temp music file")
+                logging.error(f"❌ Temp music file was not created")
                 return False
+            else:
+                file_size = os.path.getsize(temp_music_path)
+                logging.info(f"🎵 Temp music created: {file_size // (1024*1024)}MB")
                 
         except Exception as e:
             logging.error(f"❌ Exception creating temp music: {e}")
             return False
 
-        from api_monitor_module.utils.monitor_access import track_api_call_simple
+        # Success!
         track_api_call_simple("song_list_generation_batch", success=True, 
                             songs_selected=len(selected_songs),
                             total_duration=int(total_duration))
 
+        logging.info(f"🎉 Song processing completed successfully!")
         return list_path
 
 def generate_distributed_song_lists(sheet_url, distribution_settings, duration_in_seconds, 
@@ -352,8 +412,7 @@ def generate_distributed_song_lists(sheet_url, distribution_settings, duration_i
         distribution_method = distribution_settings['distribution_method']
         song_ranges = distribution_settings['song_distribution']
         
-        # Load all songs once
-        logging.info(f"Loading songs for distribution across {num_videos} videos")
+        logging.info(f"🎬 Generating distributed song lists for {num_videos} videos")
         
         # Use the batch generator to load songs efficiently
         _batch_generator._ensure_connection()
@@ -382,12 +441,11 @@ def generate_distributed_song_lists(sheet_url, distribution_settings, duration_i
                     last_week = week
                 all_weeks.append(week)
         
-        logging.info(f"Loaded {len(all_songs)} songs for distribution")
+        logging.info(f"📊 Loaded {len(all_songs)} songs for distribution")
         
         # Shuffle if random distribution
         if distribution_method == "random":
             import random
-            # Create pairs of (song, week) to maintain relationship
             song_week_pairs = list(zip(all_songs, all_weeks))
             random.shuffle(song_week_pairs)
             all_songs, all_weeks = zip(*song_week_pairs)
@@ -404,11 +462,9 @@ def generate_distributed_song_lists(sheet_url, distribution_settings, duration_i
             video_songs = all_songs[start_idx-1:end_idx]
             video_weeks = all_weeks[start_idx-1:end_idx]
             
-            logging.info(f"Video {video_num}: {len(video_songs)} songs (range {start_idx}-{end_idx})")
+            logging.info(f"🎬 Video {video_num}: {len(video_songs)} songs (range {start_idx}-{end_idx})")
             
-            # Generate song list for this video
-            # FIXED: Use proper base name instead of generic video_X name
-            base_name = f"Part{video_num}"  # This will be combined with actual file name later
+            base_name = f"Part{video_num}"
             output_filename = f"{base_name}_song_list.txt"
             
             # Create song list by repeating the chunk to fill duration
@@ -441,13 +497,13 @@ def generate_distributed_song_lists(sheet_url, distribution_settings, duration_i
                 
                 song_index += 1
             
-            # Save song list - use temporary filename for now
+            # Save song list
             list_path = os.path.join(output_folder, output_filename)
             with open(list_path, "w", encoding="utf-8") as f:
                 for song in selected_songs:
                     f.write(song + "\n")
             
-            # Create timestamp file if requested - use temporary filename for now
+            # Create timestamp file if requested
             timestamp_path = None
             if export_timestamp:
                 timestamp_path = os.path.join(output_folder, f"{base_name}_song_list_timestamp.txt")
@@ -503,9 +559,10 @@ def generate_distributed_song_lists(sheet_url, distribution_settings, duration_i
                 'concat_file_path': concat_file_path,
                 'songs_count': len(video_songs),
                 'loops': len(selected_songs) // len(video_songs),
-                'base_name': base_name  # Store base name for later renaming
+                'base_name': base_name
             })
         
+        logging.info(f"🎉 Created {len(video_song_lists)} distributed song lists")
         return video_song_lists
         
     except Exception as e:

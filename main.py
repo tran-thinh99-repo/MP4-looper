@@ -363,19 +363,28 @@ class MP4LooperApp:
             ui.update_progress(0, f"Processing file {index+1} of {total_files}: {file_name}")
             ui.set_current_file(index, file_name)
             
-            # Generate output filename
-            base_name = os.path.splitext(file_name)[0]
+            # FIXED: Generate output filename that preserves suffix
+            base_name = os.path.splitext(file_name)[0]  # Remove .mp4 extension
+            
+            # Create duration suffix
             h, m, s = format_duration(duration)
             time_suffix = f"{h}h" if h > 0 else ""
             time_suffix += f"{m}m" if m > 0 else ""
             time_suffix += f"{s}s" if s > 0 else ""
+            
+            # FIXED: Preserve any existing suffix in the base name
+            # If base_name is "0248_3h", keep it as "0248_3h_1h.mp4" (not "0248_1h.mp4")
             output_name = f"{base_name}_{time_suffix}.mp4"
             
             logging.info(f"Processing file {index+1}/{total_files}: {file_name}")
             logging.info(f"Output: {output_name}, Duration: {duration}s")
             
+            # FIXED: Generate song list filename that matches the video base name
+            # This ensures "0248_3h.mp4" gets "0248_3h_song_list.txt" (not "0248_song_list.txt")
+            song_list_filename = f"{base_name}_song_list.txt"
+            
             # Generate song list using batch-optimized method
-            if not self.generate_song_list(base_name, duration, output_folder, music_folder, 
+            if not self.generate_song_list(song_list_filename, duration, output_folder, music_folder, 
                                             sheet_url, new_song_count, export_timestamp):
                 logging.error("Failed to generate song list, skipping file")
                 continue
@@ -680,12 +689,10 @@ class MP4LooperApp:
             logging.error(f"Error rendering distributed video: {e}")
             return False
 
-    def generate_song_list(self, base_name, duration, output_folder, music_folder, 
-                           sheet_url, new_song_count, export_timestamp):
+    def generate_song_list(self, output_filename, duration, output_folder, music_folder, 
+                       sheet_url, new_song_count, export_timestamp):
         """Generate song list using batch optimization"""
         try:
-            output_filename = f"{base_name}_song_list.txt"
-            
             # Convert edit URL to the direct API access URL if needed
             if "edit" in sheet_url or "#gid=" in sheet_url:
                 # Extract the sheet ID and gid
@@ -700,7 +707,7 @@ class MP4LooperApp:
             
             result = generate_song_list_for_batch(
                 sheet_url=sheet_url,
-                output_filename=output_filename,
+                output_filename=output_filename,  # This now includes the full base name with suffix
                 duration_in_seconds=duration,
                 music_folder=music_folder,
                 output_folder=output_folder,
@@ -727,16 +734,35 @@ class MP4LooperApp:
             return False
 
     def render_video(self, input_file, output_folder, output_name, duration, fade_audio, ui):
-        """Render a video with the given parameters"""
+        """Render a video with the given parameters - FIXED VERSION"""
         try:
             output_path = os.path.join(output_folder, output_name)
             
-            # Find the temp music file created by song list generator
-            temp_music_path = os.path.join(output_folder, "temp_music.wav")
+            # FIXED: Look for the specific temp music file that matches the output name
+            # Extract base name from output_name (e.g., "0250_1h.mp4" -> "0250")
+            base_name = os.path.splitext(output_name)[0]
+            if "_" in base_name:
+                # Remove duration suffix (e.g., "0250_1h" -> "0250")
+                base_name = base_name.rsplit("_", 1)[0]
+            
+            # Look for the specific temp music file for this video
+            temp_music_path = os.path.join(output_folder, f"{base_name}_temp_music.wav")
+            
+            logging.info(f"Looking for temp music file: {temp_music_path}")
+            
             if not os.path.exists(temp_music_path):
-                logging.error(f"Temp music file not found: {temp_music_path}")
-                return False
+                # Fallback: try the old generic name
+                temp_music_path = os.path.join(output_folder, "temp_music.wav")
+                logging.warning(f"Specific temp music not found, trying fallback: {temp_music_path}")
                 
+                if not os.path.exists(temp_music_path):
+                    logging.error(f"No temp music file found for {output_name}")
+                    logging.error(f"Tried: {os.path.join(output_folder, f'{base_name}_temp_music.wav')}")
+                    logging.error(f"Tried: {temp_music_path}")
+                    return False
+            
+            logging.info(f"Using temp music file: {temp_music_path}")
+            
             # Setup ffmpeg command
             fade_filter = []
             if fade_audio:
@@ -817,9 +843,15 @@ class MP4LooperApp:
                 logging.error("Post-render validation failed")
                 return False
                 
-            # Clean up temp files
-            temp_files = ["temp_music.wav", "music_concat.txt"]
-            for temp_file in temp_files:
+            # Clean up temp files (UPDATED: Clean specific files for this video)
+            temp_files_to_clean = [
+                f"{base_name}_temp_music.wav",
+                f"{base_name}_music_concat.txt",
+                "temp_music.wav",  # Clean old generic file too if it exists
+                "music_concat.txt"  # Clean old generic file too if it exists
+            ]
+            
+            for temp_file in temp_files_to_clean:
                 temp_path = os.path.join(output_folder, temp_file)
                 if os.path.exists(temp_path):
                     try:

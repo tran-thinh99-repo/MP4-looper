@@ -4,6 +4,8 @@ Detached Utility Window - Follows main UI, no title bar buttons
 """
 
 import logging
+import sys
+import os
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import messagebox
@@ -518,10 +520,44 @@ class UtilityWindow(ctk.CTkToplevel):
     def _show_debug_log(self):
         """Show debug log - delegate to controller"""
         try:
-            self.controller.show_debug_log(self.parent)
+            # Use the same logic as setup_logging() in utils.py
+            if getattr(sys, 'frozen', False):
+                # Running as a bundled executable - debug.log is next to the .exe
+                log_dir = os.path.dirname(sys.executable)
+            else:
+                # Running as a script - debug.log is next to the main script
+                # Get the directory of the main script (not this utility file)
+                if hasattr(sys, 'argv') and sys.argv[0]:
+                    log_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+                else:
+                    log_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            log_path = os.path.join(log_dir, "debug.log")
+            
+            if os.path.exists(log_path):
+                try:
+                    # Windows - open with default application
+                    if sys.platform == "win32":
+                        os.startfile(log_path)
+                    else:
+                        # Linux/Mac
+                        subprocess.run(["xdg-open", log_path], check=True)
+                        
+                except Exception as e:
+                    logging.error(f"Failed to open log file: {e}")
+                    messagebox.showerror("Error", f"Failed to open debug log: {e}", parent=self)
+            else:
+                messagebox.showerror(
+                    "Log Not Found", 
+                    f"Debug log not found at expected location:\n{log_path}\n\n"
+                    f"This usually means no logging has occurred yet or the application "
+                    f"is running in a different mode than expected.",
+                    parent=self
+                )
+                
         except Exception as e:
             logging.error(f"Error showing debug log: {e}")
-            messagebox.showerror("Error", f"Failed to open debug log: {e}", parent=self)
+            messagebox.showerror("Error", f"Failed to show debug log: {e}", parent=self)
     
     def _clean_canceled_uploads(self):
         """Clean canceled uploads - delegate to controller"""

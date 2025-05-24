@@ -44,12 +44,17 @@ class BatchProcessorUI(TkinterDnD.Tk):
         
         # Initialize duration display variable
         default_duration = self.settings_manager.get("ui.loop_duration", "3600")
-        h, m, s = format_duration(int(default_duration))
+        try:
+            duration_int = int(default_duration)
+        except:
+            duration_int = 3600
+            
+        h, m, s = format_duration(duration_int)
         display_text = ""
         if h > 0: display_text += f"{h}h "
         if m > 0 or (h > 0 and s > 0): display_text += f"{m}m "
         if s > 0 or (h == 0 and m == 0): display_text += f"{s}s"
-        self.duration_display_var = tk.StringVar(value=f"({display_text.strip()})") 
+        self.duration_display_var = tk.StringVar(value=f"({display_text.strip()})")
         
         # Create detached utility window (initially hidden)
         self.utility_window = None
@@ -658,7 +663,6 @@ class BatchProcessorUI(TkinterDnD.Tk):
         duration_label.pack(side="left", padx=(10, 5))
         
         # Add the converted time display
-        # The duration_display_var was moved to __init__
         self.duration_display = ctk.CTkLabel(
             top_row,
             textvariable=self.duration_display_var,
@@ -675,9 +679,12 @@ class BatchProcessorUI(TkinterDnD.Tk):
         self.duration_input.pack(side="top", pady=5)
         self.duration_input.insert(0, "3600")  # Default to 1 hour
         
-        # Add input validation and display update
+        # FIXED: Add proper event bindings for real-time updates
         self.duration_input.bind("<KeyRelease>", self.validate_and_display_duration)
-        self.duration_input.bind("<FocusOut>", self.validate_and_display_duration)
+        self.duration_input.bind("<FocusOut>", self.validate_and_display_duration) 
+        self.duration_input.bind("<Return>", self.validate_and_display_duration)
+        # Add immediate update when user finishes typing
+        self.duration_input.bind("<KeyPress>", lambda e: self.after(100, self.validate_and_display_duration))
         
         # Time buttons frame
         time_buttons_frame = ctk.CTkFrame(duration_frame, fg_color="transparent")
@@ -711,7 +718,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
         return button
 
     def adjust_duration(self, seconds):
-        """Adjust the duration by the specified number of seconds"""
+        """Adjust the duration by the specified number of seconds - FIXED VERSION"""
         try:
             # Get the current duration
             current_duration = int(self.duration_input.get())
@@ -726,27 +733,37 @@ class BatchProcessorUI(TkinterDnD.Tk):
             self.duration_input.delete(0, tk.END)
             self.duration_input.insert(0, str(new_duration))
             
-            # Update the display
+            # CRITICAL FIX: Force update the display immediately
             self.update_duration_display(new_duration)
             
-            # Save the new duration in settings
-            self.controller.save_setting("loop_duration", str(new_duration))
+            # CRITICAL FIX: Update the output preview as well
+            self.update_file_display()
+            
+            # Save the setting immediately
+            try:
+                self.settings_manager.set("ui.loop_duration", str(new_duration))
+            except Exception as e:
+                logging.debug(f"Could not save duration setting: {e}")
             
         except ValueError:
-            # If the current value isn't a valid integer, reset to 600 (10 minutes)
+            # If the current value isn't a valid integer, reset to default
+            default_duration = self.settings_manager.get("ui.loop_duration", "3600")
             self.duration_input.delete(0, tk.END)
-            self.duration_input.insert(0, "3600")
-            self.update_duration_display(3600)
+            self.duration_input.insert(0, default_duration)
+            self.update_duration_display(int(default_duration))
+            self.update_file_display()  # Update output preview too
 
     def validate_and_display_duration(self, event=None):
-        """Validate the duration input and update the display"""
+        """Validate the duration input and update the display - COMPLETE FIX"""
         current_text = self.duration_input.get().strip()
         
-        # If empty, set to 3600 (1 hour)
+        # If empty, use default
         if not current_text:
+            default_duration = self.settings_manager.get("ui.loop_duration", "3600")
             self.duration_input.delete(0, tk.END)
-            self.duration_input.insert(0, "3600")
-            self.update_duration_display(3600)
+            self.duration_input.insert(0, default_duration)
+            self.update_duration_display(int(default_duration))
+            self.update_file_display()  # Update output preview
             return
         
         try:
@@ -759,17 +776,30 @@ class BatchProcessorUI(TkinterDnD.Tk):
                 self.duration_input.delete(0, tk.END)
                 self.duration_input.insert(0, "1")
             
-            # Update the display
+            # CRITICAL: Always update both displays
             self.update_duration_display(duration)
+            self.update_file_display()  # Update output preview
             
             # Save the duration in settings
-            self.controller.save_setting("loop_duration", str(duration))
+            try:
+                self.settings_manager.set("ui.loop_duration", str(duration))
+            except Exception as e:
+                logging.debug(f"Could not save duration setting: {e}")
             
         except ValueError:
-            # If not a valid integer, reset to previous value or 3600
-            self.duration_input.delete(0, tk.END)
-            self.duration_input.insert(0, "3600")
-            self.update_duration_display(3600)
+            # If not a valid integer, reset to current setting or default
+            try:
+                current_setting = self.settings_manager.get("ui.loop_duration", "3600")
+                self.duration_input.delete(0, tk.END)
+                self.duration_input.insert(0, current_setting)
+                self.update_duration_display(int(current_setting))
+                self.update_file_display()  # Update output preview
+            except:
+                # Final fallback
+                self.duration_input.delete(0, tk.END)
+                self.duration_input.insert(0, "3600")
+                self.update_duration_display(3600)
+                self.update_file_display()  # Update output preview
 
     def update_duration_display(self, seconds):
         """Update the display showing the duration in h:m:s format"""
@@ -1332,11 +1362,20 @@ class BatchProcessorUI(TkinterDnD.Tk):
             # Hide the drop indicator when files exist
             self.drop_indicator.grid_forget()
         
-        # Rest of the method stays the same...
-        # Get the current duration for output file naming
-        duration = 600  # Default to 600s (10m)
-        if self.duration_input.get().isdigit():
-            duration = int(self.duration_input.get())
+        duration = 3600  # Default to 3600s (1h) - matches the default input
+        try:
+            if hasattr(self, 'duration_input') and self.duration_input.get().strip():
+                duration_text = self.duration_input.get().strip()
+                if duration_text.isdigit():
+                    duration = int(duration_text)
+                else:
+                    # Fallback to settings if input is invalid
+                    duration = int(self.settings_manager.get("ui.loop_duration", "3600"))
+            else:
+                # If duration_input doesn't exist yet, use settings
+                duration = int(self.settings_manager.get("ui.loop_duration", "3600"))
+        except:
+            duration = 3600  # Final fallback
         
         h, m, s = format_duration(duration)
         time_suffix = f"{h}h" if h > 0 else ""
@@ -1751,63 +1790,6 @@ class BatchProcessorUI(TkinterDnD.Tk):
                     parent=self
                 )
     
-    def create_duration_section(self, main_container, r):
-        """Create an enhanced duration input section"""
-        duration_frame = ctk.CTkFrame(main_container)
-        duration_frame.grid(row=r, column=0, sticky="ew", pady=10)
-        
-        # Top row with label and converted display
-        top_row = ctk.CTkFrame(duration_frame, fg_color="transparent")
-        top_row.pack(pady=(5, 2), fill="x")
-        
-        # Duration label
-        duration_label = ctk.CTkLabel(
-            top_row, 
-            text="Loop Duration (seconds):", 
-            font=("Arial", 12)
-        )
-        duration_label.pack(side="left", padx=(10, 5))
-        
-        # Add the converted time display
-        self.duration_display = ctk.CTkLabel(
-            top_row,
-            textvariable=self.duration_display_var,
-            font=("Arial", 12),
-            text_color="#00bfff"  # Light blue for visibility
-        )
-        self.duration_display.pack(side="left", padx=5)
-        
-        # Duration input field
-        duration_input_frame = ctk.CTkFrame(duration_frame, fg_color="transparent")
-        duration_input_frame.pack(pady=5)
-        
-        self.duration_input = ctk.CTkEntry(duration_input_frame, width=100)
-        self.duration_input.pack(side="top", pady=5)
-        self.duration_input.insert(0, "3600")  # Default to 1 hour
-        
-        # Add input validation and display update
-        self.duration_input.bind("<KeyRelease>", self.validate_and_display_duration)
-        self.duration_input.bind("<FocusOut>", self.validate_and_display_duration)
-        
-        # Time buttons frame
-        time_buttons_frame = ctk.CTkFrame(duration_frame, fg_color="transparent")
-        time_buttons_frame.pack(pady=5)
-        
-        # Add decrement buttons (-11h, -3h, -1h)
-        self.create_duration_button(time_buttons_frame, "-11h", -39600, "#dc3545")
-        self.create_duration_button(time_buttons_frame, "-3h", -10800, "#dc3545")
-        self.create_duration_button(time_buttons_frame, "-1h", -3600, "#dc3545")
-        
-        # Add increment buttons (+1h, +3h, +11h)
-        self.create_duration_button(time_buttons_frame, "+1h", 3600, "#28a745")
-        self.create_duration_button(time_buttons_frame, "+3h", 10800, "#28a745")
-        self.create_duration_button(time_buttons_frame, "+11h", 39600, "#28a745")
-        
-        # Initialize the display
-        self.update_duration_display(3600)
-        
-        return duration_frame
-
     def _darken_color(self, hex_color, factor=0.15):
         """Darken a hex color by a factor (0-1)"""
         # Skip the '#' and convert to RGB
@@ -1823,84 +1805,6 @@ class BatchProcessorUI(TkinterDnD.Tk):
         # Convert back to hex
         return f"#{r:02x}{g:02x}{b:02x}"
 
-    def adjust_duration(self, seconds):
-        """Adjust the duration by the specified number of seconds - UPDATED METHOD"""
-        try:
-            # Get the current duration
-            current_duration = int(self.duration_input.get())
-            
-            # Calculate the new duration
-            new_duration = current_duration + seconds
-            
-            # Ensure it's at least 1 second
-            new_duration = max(1, new_duration)
-            
-            # Update the entry field
-            self.duration_input.delete(0, tk.END)
-            self.duration_input.insert(0, str(new_duration))
-            
-            # Update the display
-            self.update_duration_display(new_duration)
-            
-            # Save the setting immediately
-            self.on_setting_changed('duration', str(new_duration))
-            
-        except ValueError:
-            # If the current value isn't a valid integer, reset to default
-            default_duration = self.settings_manager.get("ui.loop_duration", "3600")
-            self.duration_input.delete(0, tk.END)
-            self.duration_input.insert(0, default_duration)
-            self.update_duration_display(int(default_duration))
-
-    def validate_and_display_duration(self, event=None):
-        """Validate the duration input and update the display"""
-        current_text = self.duration_input.get().strip()
-        
-        # If empty, set to 600 (10 minutes)
-        if not current_text:
-            self.duration_input.delete(0, tk.END)
-            self.duration_input.insert(0, "600")
-            self.update_duration_display(600)
-            return
-        
-        try:
-            # Try to convert to an integer
-            duration = int(current_text)
-            
-            # Enforce minimum value of 1 second
-            if duration < 1:
-                duration = 1
-                self.duration_input.delete(0, tk.END)
-                self.duration_input.insert(0, "1")
-            
-            # Update the display
-            self.update_duration_display(duration)
-            
-            # Save the duration in settings
-            self.controller.save_setting("loop_duration", str(duration))
-            
-        except ValueError:
-            # If not a valid integer, reset to previous value or 600
-            self.duration_input.delete(0, tk.END)
-            self.duration_input.insert(0, "600")
-            self.update_duration_display(600)
-
-    def update_duration_display(self, seconds):
-        """Update the display showing the duration in h:m:s format"""
-        h, m, s = format_duration(seconds)
-        
-        # Create display text
-        display_text = ""
-        if h > 0:
-            display_text += f"{h}h "
-        if m > 0 or (h > 0 and s > 0):
-            display_text += f"{m}m "
-        if s > 0 or (h == 0 and m == 0):
-            display_text += f"{s}s"
-        
-        # Update the display
-        self.duration_display_var.set(f"({display_text.strip()})")
-    
     def send_debug_info(self):
         """Handle the Send Debug Info button click"""
         try:
