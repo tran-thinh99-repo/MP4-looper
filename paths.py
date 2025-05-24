@@ -206,15 +206,6 @@ def is_frozen() -> bool:
     """Check if running as compiled executable"""
     return get_path_manager().is_frozen
 
-
-# Utility functions (keep these in paths.py as the single source)
-def format_timestamp(seconds):
-    """Format seconds into HH:MM:SS timestamp"""
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    return f"{h:02}:{m:02}:{s:02}"
-
 def open_folder(path, label="Folder", parent_window=None):
     """Open a folder in the file explorer"""
     if os.path.isdir(path):

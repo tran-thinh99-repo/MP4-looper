@@ -12,11 +12,12 @@ from tkinter import messagebox
 from dotenv import load_dotenv
 
 # Import modules from existing application
+from icon_helper import set_window_icon
 from utils import (setup_logging, disable_cmd_edit_mode, check_environment_vars, format_duration,
                   open_folder, check_canceled_upload_folder_status)
-from song_utils import generate_song_list_from_google_sheet
+from song_utils import generate_distributed_song_lists, generate_song_list_for_batch
 from post_render_check import validate_render
-from config import SETTINGS_FILE, GITHUB_REPO_NAME, GITHUB_REPO_OWNER
+from config import GITHUB_REPO_NAME, GITHUB_REPO_OWNER
 from ui_components import BatchProcessorUI
 from dependency_checker import main as check_dependencies
 from paths import get_resource_path, get_base_path, clean_folder_with_confirmation
@@ -30,7 +31,7 @@ class MP4LooperApp:
     def __init__(self):
         setup_logging()
         load_environment_variables()  # Remove load_dotenv() - load_environment_variables() handles it
-
+        check_dependencies()
         # Initialize settings manager EARLY
         self.settings_manager = get_settings()
 
@@ -92,7 +93,7 @@ class MP4LooperApp:
         
         # Application settings
         self.app_name = "MP4 Looper"
-        self.version = "1.1.0"  # Production version
+        self.version = "1.2.0"  # Production version
 
         # Load sheet presets from environment variables
         self.sheet_presets = {
@@ -102,7 +103,7 @@ class MP4LooperApp:
         
         # Initialize UI and other components
         self.ui = BatchProcessorUI(self)
-        self.ui.title(f"{self.app_name} v{self.version}")
+        self.ui.title(f"{self.app_name} v{self.version} by EAGLE NET")
 
         # One-line update check that will be shown after UI loads
         self.ui.after(1000, lambda: UpdateChecker(
@@ -112,8 +113,7 @@ class MP4LooperApp:
             GITHUB_REPO_NAME, 
         ).check_and_notify(self.ui))
 
-        icon_path = get_resource_path("mp4_looper_icon.ico")
-        self.ui.iconbitmap(default=icon_path)
+        set_window_icon(self.ui)
 
         disable_cmd_edit_mode()
 
@@ -170,34 +170,13 @@ class MP4LooperApp:
         
         logging.info("✅ Dummy API monitor created - application will work without monitoring")
         return DummyMonitor()
-
-    # KEEP THIS METHOD for backward compatibility during transition
-    def load_settings(self):
-        """TRANSITION METHOD: Load settings using new settings manager"""
+    
+    def apply_saved_settings(self):
+        """Apply saved settings to UI components - SIMPLIFIED VERSION"""
         try:
-            return self.get_legacy_settings()
-        except Exception as e:
-            logging.error(f"Error in load_settings transition method: {e}")
-            return {}
-
-    # KEEP THIS METHOD for backward compatibility during transition  
-    def save_settings(self, settings=None):
-        """TRANSITION METHOD: Save settings using new settings manager"""
-        try:
-            if settings:
-                # Convert old format to new format
-                self.save_legacy_settings(settings)
-            else:
-                # Save current UI state
-                self.save_ui_settings()
-        except Exception as e:
-            logging.error(f"Error in save_settings transition method: {e}")
-
-    def get_legacy_settings(self):
-        """Get settings in old format for backward compatibility"""
-        try:
-            return {
-                "output_folder": self.settings_manager.get("ui.output_folder", ""),
+            # Get settings directly from settings manager
+            settings = {
+                "output_folder": self.settings_manager.get("ui.output_folder", os.getcwd()),
                 "music_folder": self.settings_manager.get("ui.music_folder", ""),
                 "loop_duration": self.settings_manager.get("ui.loop_duration", "3600"),
                 "sheet_url": self.settings_manager.get("sheets.sheet_url", ""),
@@ -206,108 +185,15 @@ class MP4LooperApp:
                 "default_song_count": self.settings_manager.get("processing.default_song_count", "5"),
                 "fade_audio": self.settings_manager.get("processing.fade_audio", True),
                 "export_timestamp": self.settings_manager.get("processing.export_timestamp", True),
-                "auto_upload": self.settings_manager.get("processing.auto_upload", False)
+                "auto_upload": self.settings_manager.get("processing.auto_upload", False),
             }
-        except Exception as e:
-            logging.error(f"Error getting legacy settings: {e}")
-            return {}
-
-    def save_legacy_settings(self, settings):
-        """Save settings from old format to new format"""
-        try:
-            # Map old keys to new structure
-            key_mapping = {
-                "output_folder": "ui.output_folder",
-                "music_folder": "ui.music_folder", 
-                "loop_duration": "ui.loop_duration",
-                "sheet_url": "sheets.sheet_url",
-                "sheet_preset": "sheets.sheet_preset",
-                "use_default_song_count": "processing.use_default_song_count",
-                "default_song_count": "processing.default_song_count",
-                "auto_upload": "processing.auto_upload",
-                "fade_audio": "processing.fade_audio",
-                "export_timestamp": "processing.export_timestamp"
-            }
-            
-            # Save each setting
-            for old_key, value in settings.items():
-                new_key = key_mapping.get(old_key, old_key)
-                self.settings_manager.set(new_key, value, save=False)
-            
-            # Save all changes at once
-            self.settings_manager._save_settings()
-            
-        except Exception as e:
-            logging.error(f"Error saving legacy settings: {e}")
-
-    def apply_saved_settings(self):
-        """Apply saved settings to UI components"""
-        try:
-            # Get settings in the format UI expects
-            settings = self.get_legacy_settings()
             
             # Apply to UI
             self.ui.apply_settings(settings)
-            
             logging.info("Settings applied to UI successfully")
             
         except Exception as e:
             logging.error(f"Error applying settings: {e}")
-
-    def save_setting(self, key, value):
-        """Save a single setting value - UPDATED METHOD"""
-        try:
-            # Map old keys to new structure
-            key_mapping = {
-                "output_folder": "ui.output_folder",
-                "music_folder": "ui.music_folder", 
-                "loop_duration": "ui.loop_duration",
-                "sheet_url": "sheets.sheet_url",
-                "sheet_preset": "sheets.sheet_preset",
-                "auto_upload": "processing.auto_upload",
-                "fade_audio": "processing.fade_audio",
-                "export_timestamp": "processing.export_timestamp"
-            }
-            
-            # Use mapped key or original key
-            settings_key = key_mapping.get(key, key)
-            
-            self.settings_manager.set(settings_key, value)
-            logging.debug(f"Setting saved: {settings_key} = {value}")
-            
-        except Exception as e:
-            logging.error(f"Error saving setting {key}: {e}")
-
-    def save_ui_settings(self):
-        """Save current UI state to settings"""
-        try:
-            if hasattr(self, 'ui'):
-                current_settings = self.ui.get_current_settings()
-                
-                # Update settings manager with current UI state
-                self.settings_manager.update_section('ui', {
-                    'output_folder': current_settings.get('output_folder', ''),
-                    'music_folder': current_settings.get('music_folder', ''),
-                    'loop_duration': current_settings.get('loop_duration', '3600')
-                })
-                
-                self.settings_manager.update_section('sheets', {
-                    'sheet_url': current_settings.get('sheet_url', ''),
-                    'sheet_preset': current_settings.get('sheet_preset', 'Reggae')
-                })
-                
-                self.settings_manager.update_section('processing', {
-                    'use_default_song_count': current_settings.get('use_default_song_count', True),
-                    'default_song_count': current_settings.get('default_song_count', '5'),
-                    'fade_audio': current_settings.get('fade_audio', True),
-                    'export_timestamp': current_settings.get('export_timestamp', True),
-                    'auto_upload': current_settings.get('auto_upload', False)
-                })
-                
-                logging.info("UI settings saved successfully")
-                
-        except Exception as e:
-            logging.error(f"Error saving UI settings: {e}")
 
     def get_sheet_presets(self):
         """Return available sheet preset names for dropdown"""
@@ -432,6 +318,14 @@ class MP4LooperApp:
         self.rendering = True
         ui.rendering = True
         
+        # Check if we're in distribution mode
+        distribution_settings = getattr(self, 'distribution_settings', None)
+        
+        if distribution_settings and distribution_settings.get('enabled'):
+            # Process in distribution mode
+            self.process_files_distributed(params, ui, distribution_settings)
+            return
+        
         file_paths = params["file_paths"]
         duration = params["duration"]
         output_folder = params["output_folder"]
@@ -497,6 +391,288 @@ class MP4LooperApp:
         self.rendering = False
         ui.processing_complete()
 
+    def process_files_distributed(self, params, ui, distribution_settings):
+        """Process files in distribution mode"""
+        try:
+            file_paths = params["file_paths"]
+            duration = params["duration"]
+            output_folder = params["output_folder"]
+            music_folder = params["music_folder"]
+            sheet_url = params["sheet_url"]
+            export_timestamp = params["export_timestamp"]
+            fade_audio = params["fade_audio"]
+            auto_upload = params["auto_upload"]
+            
+            num_videos = distribution_settings['num_videos']
+            
+            # Track batch processing start
+            try:
+                from api_monitor_module.utils.monitor_access import track_api_call_simple
+                track_api_call_simple("distributed_batch_start", success=True, 
+                                    total_files=num_videos,
+                                    distribution_mode=True)
+            except ImportError:
+                logging.debug("API tracking not available")
+            
+            # Generate distributed song lists for all videos
+            ui.update_progress(0, f"Generating distributed song lists for {num_videos} videos...")
+            
+            video_song_lists = generate_distributed_song_lists(
+                sheet_url, distribution_settings, duration,
+                music_folder, output_folder, export_timestamp
+            )
+            
+            if not video_song_lists:
+                ui.update_progress(0, "Failed to generate distributed song lists")
+                return
+            
+            if isinstance(video_song_lists, tuple) and video_song_lists[0] == "missing":
+                missing_files = video_song_lists[1]
+                message = (
+                    "Could not generate background music.\n\n"
+                    f"Missing .wav files in:\n{music_folder}\n\n"
+                    + "\n".join(missing_files[:10]) + 
+                    ("\n..." if len(missing_files) > 10 else "")
+                )
+                messagebox.showerror("Missing WAV Files", message)
+                return
+            
+            # Process each video
+            for i, video_info in enumerate(video_song_lists):
+                if not self.rendering or not ui.rendering:
+                    break
+                
+                video_num = video_info['video_num']
+                temp_music_path = video_info['temp_music_path']
+                old_base_name = video_info['base_name']  # e.g., "Part1"
+                
+                # Use the first file in queue for all videos, or cycle through if multiple files
+                file_index = i % len(file_paths)
+                file_path = file_paths[file_index]
+                file_name = os.path.basename(file_path)
+                
+                # Update UI
+                ui.update_progress(0, f"Processing video {video_num} of {num_videos}: {file_name}")
+                ui.set_current_file(i, f"Video {video_num} - {file_name}")
+                
+                # Generate output filename with actual base name
+                base_name = os.path.splitext(file_name)[0]
+                h, m, s = format_duration(duration)
+                time_suffix = f"{h}h" if h > 0 else ""
+                time_suffix += f"{m}m" if m > 0 else ""
+                time_suffix += f"{s}s" if s > 0 else ""
+                output_name = f"{base_name}_Part{video_num}_{time_suffix}.mp4"
+                
+                # FIXED: Rename song list files to match the actual video name
+                # Rename song list file
+                old_song_list_path = video_info['song_list_path']
+                new_song_list_name = f"{base_name}_Part{video_num}_song_list.txt"
+                new_song_list_path = os.path.join(output_folder, new_song_list_name)
+                
+                try:
+                    if os.path.exists(old_song_list_path):
+                        os.rename(old_song_list_path, new_song_list_path)
+                        logging.info(f"Renamed song list: {old_song_list_path} -> {new_song_list_path}")
+                except Exception as e:
+                    logging.error(f"Failed to rename song list file: {e}")
+                
+                # FIXED: Rename timestamp file if it exists
+                if video_info.get('timestamp_path') and os.path.exists(video_info['timestamp_path']):
+                    old_timestamp_path = video_info['timestamp_path']
+                    new_timestamp_name = f"{base_name}_Part{video_num}_song_list_timestamp.txt"
+                    new_timestamp_path = os.path.join(output_folder, new_timestamp_name)
+                    
+                    try:
+                        os.rename(old_timestamp_path, new_timestamp_path)
+                        logging.info(f"Renamed timestamp file: {old_timestamp_path} -> {new_timestamp_path}")
+                    except Exception as e:
+                        logging.error(f"Failed to rename timestamp file: {e}")
+                
+                # FIXED: Rename temp music and concat files to match
+                # Rename temp music file
+                old_temp_music_path = temp_music_path
+                new_temp_music_name = f"{base_name}_Part{video_num}_temp_music.wav"
+                new_temp_music_path = os.path.join(output_folder, new_temp_music_name)
+                
+                try:
+                    if os.path.exists(old_temp_music_path):
+                        os.rename(old_temp_music_path, new_temp_music_path)
+                        temp_music_path = new_temp_music_path  # Update the path for rendering
+                        logging.info(f"Renamed temp music: {old_temp_music_path} -> {new_temp_music_path}")
+                except Exception as e:
+                    logging.error(f"Failed to rename temp music file: {e}")
+                
+                # Rename concat file
+                if video_info.get('concat_file_path') and os.path.exists(video_info['concat_file_path']):
+                    old_concat_path = video_info['concat_file_path']
+                    new_concat_name = f"{base_name}_Part{video_num}_music_concat.txt"
+                    new_concat_path = os.path.join(output_folder, new_concat_name)
+                    
+                    try:
+                        os.rename(old_concat_path, new_concat_path)
+                        logging.info(f"Renamed concat file: {old_concat_path} -> {new_concat_path}")
+                    except Exception as e:
+                        logging.error(f"Failed to rename concat file: {e}")
+                
+                logging.info(f"Processing video {video_num}/{num_videos}: {output_name}")
+                logging.info(f"Using {video_info['songs_count']} unique songs, {video_info['loops']} loops")
+                
+                # Render video using the distributed temp music
+                success = self.render_video_distributed(
+                    file_path, output_folder, output_name, duration, 
+                    fade_audio, ui, temp_music_path
+                )
+                
+                if success and auto_upload:
+                    self.upload_to_drive(output_folder, output_name)
+                
+                # Clean up temp files for this video
+                try:
+                    if os.path.exists(temp_music_path):
+                        os.remove(temp_music_path)
+                        logging.info(f"Cleaned up temp music: {temp_music_path}")
+                    
+                    # Clean up concat file if it exists
+                    concat_file_path = os.path.join(output_folder, f"{base_name}_Part{video_num}_music_concat.txt")
+                    if os.path.exists(concat_file_path):
+                        os.remove(concat_file_path)
+                        logging.info(f"Cleaned up concat file: {concat_file_path}")
+                        
+                except Exception as e:
+                    logging.error(f"Error cleaning up temp files: {e}")
+            
+            # Track completion
+            try:
+                from api_monitor_module.utils.monitor_access import track_api_call_simple
+                track_api_call_simple("distributed_batch_complete", success=True,
+                                    videos_processed=num_videos)
+            except ImportError:
+                logging.debug("API tracking not available")
+            
+            # Update UI when done
+            self.rendering = False
+            ui.processing_complete()
+            
+            # Clear distribution settings
+            self.distribution_settings = None
+            
+        except Exception as e:
+            logging.error(f"Error in distributed processing: {e}")
+            self.rendering = False
+            ui.processing_complete()
+
+    def render_video_distributed(self, input_file, output_folder, output_name, 
+                           duration, fade_audio, ui, temp_music_path):
+        """Render video with pre-generated distributed music"""
+        try:
+            output_path = os.path.join(output_folder, output_name)
+            
+            # Check if temp music exists
+            if not os.path.exists(temp_music_path):
+                logging.error(f"Temp music file not found: {temp_music_path}")
+                return False
+            
+            # Setup ffmpeg command (same as original but with specific temp music)
+            fade_filter = []
+            if fade_audio:
+                fade_start = max(duration - 5, 0)
+                fade_filter = ["-af", f"afade=t=out:st={fade_start}:d=5"]
+            
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-y",
+                "-hwaccel", "cuda",
+                "-hwaccel_output_format", "cuda",  # Keep frames in GPU memory
+                "-stream_loop", "-1", "-i", str(input_file),
+                "-stream_loop", "-1", "-i", str(temp_music_path),
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-c:v", "copy",  # Copy video stream (no re-encoding)
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-t", str(duration),
+                *fade_filter,
+                "-shortest",
+                str(output_path)
+            ]
+            
+            logging.info(f"Executing FFmpeg with CUDA acceleration: {' '.join(ffmpeg_cmd)}")
+            
+            # Log GPU usage before starting
+            try:
+                gpu_result = subprocess.run(
+                    ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
+                    capture_output=True, text=True, timeout=2
+                )
+                if gpu_result.returncode == 0:
+                    gpu_usage, mem_used, mem_total = map(int, gpu_result.stdout.strip().split(","))
+                    logging.info(f"🖥 GPU Status before render: {gpu_usage}% utilization, {mem_used}/{mem_total} MB memory")
+            except Exception as e:
+                logging.debug(f"Could not check GPU status: {e}")
+            
+            # Update progress bar to 0
+            ui.update_progress(0, "Starting render...")
+            
+            # Start FFmpeg process with CREATE_NO_WINDOW flag
+            startupinfo = None
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+
+            self.current_process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            )
+            
+            # Track process for pause/stop functionality
+            self.process_pid = psutil.Process(self.current_process.pid)
+            
+            # Monitor progress
+            for line in iter(self.current_process.stdout.readline, ''):
+                if not self.rendering:
+                    self.process_pid.terminate()
+                    logging.info("Rendering stopped by user")
+                    return False
+                    
+                if "time=" in line:
+                    for part in line.split():
+                        if "time=" in part:
+                            timestamp = part.split("=")[1]
+                            try:
+                                h, m, s = map(float, timestamp.split(":"))
+                                current_time = h * 3600 + m * 60 + s
+                                progress = min(100, (current_time / duration) * 100)
+                                ui.update_progress(progress, f"Progress: {int(progress)}%")
+                            except Exception as e:
+                                logging.error(f"Progress update error: {e}")
+                            break
+            
+            # Wait for process to complete
+            self.current_process.wait()
+            
+            # Validate the output
+            if not os.path.exists(output_path):
+                logging.error(f"Output file not found: {output_path}")
+                return False
+                
+            # Verify the output using post_render_check
+            if not validate_render(output_path, duration):
+                logging.error("Post-render validation failed")
+                return False
+            
+            ui.update_progress(100, "Render complete")
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error rendering distributed video: {e}")
+            return False
+
     def generate_song_list(self, base_name, duration, output_folder, music_folder, 
                            sheet_url, new_song_count, export_timestamp):
         """Generate song list using batch optimization"""
@@ -514,9 +690,6 @@ class MP4LooperApp:
                 direct_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&gid={gid}"
                 logging.info(f"Converted sheet URL to direct access: {direct_url}")
                 sheet_url = direct_url
-            
-            # Use batch-optimized song generation
-            from song_utils import generate_song_list_for_batch
             
             result = generate_song_list_for_batch(
                 sheet_url=sheet_url,

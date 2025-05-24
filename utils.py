@@ -8,72 +8,15 @@ import re
 import json
 import threading
 import ctypes
-import concurrent.futures
+
 from pathlib import Path
 from tkinter import messagebox
-from config import SCOPES, SERVICE_ACCOUNT_PATH
+
+from requests import HTTPError
 from paths import get_base_path
 
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from googleapiclient.errors import HttpError
-
-# 🔑 Load from config.py
-credentials = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_PATH, scopes=SCOPES)
-
-drive_service = build('drive', 'v3', credentials=credentials)
-
-def get_unique_filename(service, name, parent_id):
-    base, ext = os.path.splitext(name)
-    counter = 1
-    new_name = name
-    while file_exists(service, new_name, parent_id):
-        new_name = f"{base}_{counter}{ext}"
-        counter += 1
-    return new_name
-
-def file_exists(service, name, parent_id):
-    query = f"'{parent_id}' in parents and name = '{name}' and trashed = false"
-    results = service.files().list(q=query, fields="files(id)").execute()
-    return bool(results.get("files"))
-
-def upload_to_drive(local_path, folder_id, service, override_name=None, progress_callback=None):
-    filename = override_name or os.path.basename(local_path)
-
-    file_metadata = {
-        "name": filename,
-        "parents": [folder_id],
-    }
-
-    media = MediaFileUpload(local_path, resumable=True)
-
-    request = service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields='id',
-        supportsAllDrives=True
-    )
-
-    def do_upload_chunks():
-        response = None
-        while response is None:
-            status, response = request.next_chunk()
-            if status and progress_callback:
-                progress_callback(status.progress())
-        return response.get("id")
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(do_upload_chunks)
-        return future.result()
-
-def format_timestamp(seconds):
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    return f"{h:02}:{m:02}:{s:02}"
-        
+from config import SERVICE_ACCOUNT_PATH
+ 
 class ToolTip(object):
     def __init__(self, widget, text='widget info'):
         self.widget = widget
@@ -119,6 +62,22 @@ class ToolTip(object):
         self.tipwindow = None
         if tw:
             tw.destroy()
+
+def safe_operation(operation_name):
+    """Decorator for common error handling pattern"""
+    from functools import wraps
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                result = func(*args, **kwargs)
+                logging.debug(f"{operation_name} completed successfully")
+                return result
+            except Exception as e:
+                logging.error(f"{operation_name} failed: {e}")
+                return None
+        return wrapper
+    return decorator
 
 def update_total_duration(tree, label):
         """Calculates and updates total duration displayed in a Treeview widget."""
@@ -285,7 +244,7 @@ def get_or_create_folder_cached(folder_name, parent_folder_id, drive_service):
         logging.info(f"📁 Created new folder '{folder_name}' → {folder_id}")
         return folder_id
 
-    except HttpError as e:
+    except HTTPError as e:
         logging.error(f"❌ Drive error on folder lookup/create: {e}")
         return None
 
@@ -396,41 +355,91 @@ def extract_base_names(folder):
 def center_window(window, parent=None, offset_y=0):
     """
     Center a window on screen or relative to parent window.
+    FIXED VERSION - handles windows that haven't calculated their size yet
     
     Args:
         window: The window to center (Tk or Toplevel)
         parent: Optional parent window to center on (if None, centers on screen)
         offset_y: Optional vertical offset from center (positive = down)
     """
-    window.update_idletasks()  # Ensure geometry information is up to date
+    # CRITICAL: Force the window to calculate its size first
+    window.update_idletasks()  # This is already here but not enough
     
-    if parent:
-        # Center relative to parent
-        parent_x = parent.winfo_rootx()
-        parent_y = parent.winfo_rooty()
-        parent_width = parent.winfo_width()
-        parent_height = parent.winfo_height()
+    # ADDITIONAL FIX: Wait a moment for window to fully render
+    window.after(1, lambda: _do_center_window(window, parent, offset_y))
+
+def _do_center_window(window, parent=None, offset_y=0):
+    """Helper function that does the actual centering after window is ready"""
+    try:
+        # Force another update to ensure size is calculated
+        window.update_idletasks()
         
+        # Get window dimensions - with fallback if still not ready
         window_width = window.winfo_width()
         window_height = window.winfo_height()
         
-        # Calculate position
-        x = parent_x + (parent_width - window_width) // 2
-        y = parent_y + (parent_height - window_height) // 2 + offset_y
-    else:
-        # Center on screen
-        screen_width = window.winfo_screenwidth()
-        screen_height = window.winfo_screenheight()
+        # If window size is still 1x1 (not ready), use reasonable defaults
+        if window_width <= 1:
+            # Try to get requested width from geometry
+            geometry = window.geometry()
+            if 'x' in geometry:
+                try:
+                    window_width = int(geometry.split('x')[0])
+                    window_height = int(geometry.split('x')[1].split('+')[0])
+                except:
+                    # Final fallback - use reasonable defaults based on window type
+                    if hasattr(window, 'title') and 'Auth' in window.title():
+                        window_width, window_height = 400, 280  # Auth dialog
+                    elif hasattr(window, 'title') and 'Help' in window.title():
+                        window_width, window_height = 500, 800  # Help window
+                    elif hasattr(window, 'title') and 'Dashboard' in window.title():
+                        window_width, window_height = 1000, 700  # Dashboard
+                    else:
+                        window_width, window_height = 600, 400  # Generic default
         
-        window_width = window.winfo_width()
-        window_height = window.winfo_height()
+        if parent:
+            # Center relative to parent
+            parent_x = parent.winfo_rootx()
+            parent_y = parent.winfo_rooty()
+            parent_width = parent.winfo_width()
+            parent_height = parent.winfo_height()
+            
+            # Calculate position
+            x = parent_x + (parent_width - window_width) // 2
+            y = parent_y + (parent_height - window_height) // 2 + offset_y
+            
+            # Make sure window stays on screen
+            x = max(0, min(x, parent.winfo_screenwidth() - window_width))
+            y = max(0, min(y, parent.winfo_screenheight() - window_height))
+        else:
+            # Center on screen
+            screen_width = window.winfo_screenwidth()
+            screen_height = window.winfo_screenheight()
+            
+            # Calculate position
+            x = (screen_width - window_width) // 2
+            y = (screen_height - window_height) // 2 + offset_y
+            
+            # Make sure window stays on screen
+            x = max(0, min(x, screen_width - window_width))
+            y = max(0, min(y, screen_height - window_height))
         
-        # Calculate position
-        x = (screen_width - window_width) // 2
-        y = (screen_height - window_height) // 2 + offset_y
-    
-    # Set window position
-    window.geometry(f"+{x}+{y}")
+        # Set window position
+        window.geometry(f"+{x}+{y}")
+        
+        logging.debug(f"Centered window: {window_width}x{window_height} at +{x}+{y}")
+        
+    except Exception as e:
+        logging.error(f"Error centering window: {e}")
+        # Fallback: just center on screen with default size
+        try:
+            screen_width = window.winfo_screenwidth()
+            screen_height = window.winfo_screenheight()
+            x = (screen_width - 600) // 2  # Assume 600px width
+            y = (screen_height - 400) // 2  # Assume 400px height
+            window.geometry(f"+{x}+{y}")
+        except:
+            pass  # Give up gracefully
 
 def diagnose_file_locks(file_path):
     """Check if a file is locked and try to identify processes holding locks"""

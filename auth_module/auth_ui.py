@@ -4,8 +4,8 @@ import customtkinter as ctk
 import logging
 import sys
 from .email_auth import authenticate_user, is_authenticated
-from config import SERVICE_ACCOUNT_PATH
-from paths import get_resource_path
+
+from icon_helper import set_window_icon
 
 # Global tk state tracking
 _root_window = None
@@ -17,13 +17,14 @@ class AuthDialog(ctk.CTkToplevel):
         self.geometry("400x280")
         self.resizable(False, False)
         
+        # ADD THESE NEW ATTRIBUTES for spam protection
+        self.is_authenticating = False  # Prevent multiple simultaneous attempts
+        self.last_attempt_time = 0      # Track when last attempt was made
+        self.attempt_count = 0          # Count attempts in current session
+        self.min_delay_between_attempts = 2  # Minimum seconds between attempts
+
         # Try to set icon using the same method as the main app
-        try:
-            icon_path = get_resource_path("mp4_looper_icon.ico")
-            self.iconbitmap(default=icon_path)
-            logging.debug(f"Set auth dialog icon: {icon_path}")
-        except Exception as e:
-            logging.debug(f"Could not set auth dialog icon: {e}")
+        set_window_icon(self)
         
         # Set up the UI
         self.create_ui()
@@ -130,66 +131,82 @@ class AuthDialog(ctk.CTkToplevel):
         self.email_entry.focus_set()
         
     def authenticate(self):
-        """Authenticate the user with entered credentials"""
+        """Authenticate the user with spam protection"""
+        import time
+        
+        # SPAM PROTECTION 1: Prevent double-clicking
+        if self.is_authenticating:
+            return  # Already processing, ignore this click
+        
+        # SPAM PROTECTION 2: Minimum delay between attempts
+        current_time = time.time()
+        time_since_last = current_time - self.last_attempt_time
+        
+        if time_since_last < self.min_delay_between_attempts:
+            remaining_time = self.min_delay_between_attempts - time_since_last
+            self.error_var.set(f"Please wait {remaining_time:.1f} seconds...")
+            return
+        
+        # SPAM PROTECTION 3: Escalating delays after multiple failures
+        self.attempt_count += 1
+        if self.attempt_count > 3:
+            # After 3 attempts, require longer waits
+            required_delay = min(self.attempt_count * 2, 30)  # Max 30 seconds
+            if time_since_last < required_delay:
+                remaining_time = required_delay - time_since_last
+                self.error_var.set(f"Too many attempts. Wait {remaining_time:.0f} seconds...")
+                return
+        
+        # SPAM PROTECTION 4: Basic input validation
         email = self.email_entry.get().strip()
         password = self.password_entry.get()
         remember = self.remember_var.get()
         
-        # Basic validation
         if not email or not password:
             self.error_var.set("Please enter both email and password")
             return
         
-        # Show authenticating status
+        # Prevent further clicks and show loading state
+        self.is_authenticating = True
+        self.last_attempt_time = current_time
+        self.login_button.configure(state="disabled", text="Signing in...")
         self.error_var.set("Authenticating...")
         self.update_idletasks()
         
-        # Try to authenticate
-        success, message = authenticate_user(email, password, remember)
-        
-        if success:
-            self.auth_result = True
-            self.after(100, self._close_safely)
-        else:
-            # Set a shorter error message in the dialog
-            if "database" in message.lower():
-                self.error_var.set("Cannot access authentication database")
-                
-                # Show a more detailed error dialog
-                from tkinter import messagebox
-                
-                # Extract service account email if available
-                service_email = "Unknown"
-                try:
-                    import json
-                    with open(SERVICE_ACCOUNT_PATH, "r") as f:
-                        creds = json.load(f)
-                        service_email = creds.get("client_email", "Unknown")
-                except Exception:
-                    pass
-                    
-                error_details = (
-                    "Could not access the authentication database.\n\n"
-                    "Possible solutions:\n"
-                    "1. Check your internet connection\n"
-                    "2. Verify the spreadsheet ID is correct\n"
-                    f"3. Share the spreadsheet with this service account:\n"
-                    f"   {service_email}\n\n"
-                    "Do you want to continue without authentication?"
-                )
-                
-                allow_continue = messagebox.askyesno("Authentication Error", error_details)
-                if allow_continue:
-                    # Allow the user to continue anyway
-                    self.auth_result = True
-                    self.after(100, self._close_safely)
+        try:
+            # Try to authenticate (this will hit the rate limiter if needed)
+            success, message = authenticate_user(email, password, remember)
+            
+            if success:
+                self.attempt_count = 0  # Reset on successful login
+                self.auth_result = True
+                self.after(100, self._close_safely)
             else:
-                # Regular authentication errors (wrong password, etc.)
-                self.error_var.set(message)
+                # Handle authentication failure
+                if "rate limit" in message.lower() or "too many" in message.lower():
+                    # If it's a rate limit error, show the message and increase delays
+                    self.error_var.set("Too many attempts. Please wait before trying again.")
+                    self.attempt_count += 3  # Penalize rate limit hits more
+                else:
+                    # Regular authentication errors
+                    self.error_var.set(message)
+                
+                # Shake effect for failed login
+                self._shake_window()
+                
+        except Exception as e:
+            self.error_var.set("An error occurred. Please try again.")
+            logging.error(f"Authentication error: {e}")
             
-            # Shake effect for failed login
-            self._shake_window()
+        finally:
+            # Re-enable the button after a short delay
+            self.after(1000, self._reset_button_state)  # 1 second delay
             
+    def _reset_button_state(self):
+        """Reset the button state after authentication attempt"""
+        self.is_authenticating = False
+        self.login_button.configure(state="normal", text="Sign In")
+
     def _close_safely(self):
         """Close dialog safely by scheduling self-destruction"""
         self.grab_release()  # Release grab to allow parent window to continue

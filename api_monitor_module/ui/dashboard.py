@@ -8,9 +8,11 @@ import customtkinter as ctk
 import threading
 import time
 import logging
-from datetime import datetime, timedelta
-from tkinter import messagebox, filedialog
+from datetime import datetime
+from tkinter import messagebox
 from .widgets import StatsPanel, APIBreakdownPanel, UserActivityPanel, SystemHealthPanel
+from utils import center_window
+from icon_helper import set_window_icon
 
 class AdminDashboard(ctk.CTkToplevel):
     """Main admin dashboard window"""
@@ -38,7 +40,7 @@ class AdminDashboard(ctk.CTkToplevel):
         self.refresh_data()
         
         # Position window
-        self.position_window()
+        center_window(self)
     
     def setup_window(self):
         """Configure the main window"""
@@ -47,12 +49,7 @@ class AdminDashboard(ctk.CTkToplevel):
         self.minsize(800, 600)
         
         # Set icon if available
-        try:
-            from paths import get_resource_path
-            icon_path = get_resource_path("mp4_looper_icon.ico")
-            self.iconbitmap(default=icon_path)
-        except:
-            pass
+        set_window_icon(self)
         
         # Configure grid weights
         self.grid_rowconfigure(1, weight=1)  # Main content area
@@ -544,29 +541,6 @@ class AdminDashboard(ctk.CTkToplevel):
         except Exception as e:
             logging.error(f"Error opening settings dialog: {e}")
             messagebox.showerror("Settings Error", f"Failed to open settings:\n{e}", parent=self)
-    
-    def position_window(self):
-        """Position the dashboard window"""
-        self.update_idletasks()
-        
-        if self.parent_window:
-            # Center on parent window
-            parent_x = self.parent_window.winfo_rootx()
-            parent_y = self.parent_window.winfo_rooty()
-            parent_width = self.parent_window.winfo_width()
-            parent_height = self.parent_window.winfo_height()
-            
-            x = parent_x + (parent_width - 1000) // 2
-            y = parent_y + (parent_height - 700) // 2
-        else:
-            # Center on screen
-            screen_width = self.winfo_screenwidth()
-            screen_height = self.winfo_screenheight()
-            
-            x = (screen_width - 1000) // 2
-            y = (screen_height - 700) // 2
-        
-        self.geometry(f"+{x}+{y}")
     
     def on_close(self):
         """Handle window close"""

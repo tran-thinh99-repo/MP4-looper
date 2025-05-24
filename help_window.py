@@ -1,4 +1,5 @@
 from paths import get_resource_path
+from utils import center_window
 
 import customtkinter as ctk
 
@@ -31,7 +32,7 @@ class HelpWindow(ctk.CTkToplevel):
 
         # Only center if auto_center is True (off by default)
         if auto_center:
-            self.after(100, self.center_on_parent)
+            self.after(100, center_window())
 
     def set_language(self, lang):
         if self.lang != lang:
@@ -51,22 +52,3 @@ class HelpWindow(ctk.CTkToplevel):
         self.textbox.delete("1.0", "end")
         self.textbox.insert("1.0", help_text)
         self.textbox.configure(state="disabled")
-
-    def center_on_parent(self):
-        """Center the help window on the parent window"""
-        self.update_idletasks()  # Ensure geometry is updated
-        
-        # Get parent window position and dimensions
-        parent_x = self.master.winfo_rootx()
-        parent_y = self.master.winfo_rooty()
-        parent_width = self.master.winfo_width()
-        parent_height = self.master.winfo_height()
-        
-        # Calculate position for centered window
-        width = self.winfo_width()
-        height = self.winfo_height()
-        x = parent_x + (parent_width - width) // 5
-        y = parent_y + (parent_height - height) // 2
-        
-        # Set window position
-        self.geometry(f"+{x}+{y}")

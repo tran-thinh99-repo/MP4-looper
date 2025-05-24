@@ -11,8 +11,9 @@ from tkinterdnd2 import TkinterDnD, DND_FILES
 
 from help_window import HelpWindow
 from utils import center_window, format_duration
-
+from utility_window import create_utility_window  # NEW IMPORT
 from settings_manager import get_settings
+from song_distribution_modal import SongPoolDistributionModal
 
 # Configure UI Theme
 ctk.set_appearance_mode("dark")
@@ -22,7 +23,8 @@ class BatchProcessorUI(TkinterDnD.Tk):
     def __init__(self, app_controller):
         super().__init__()
         self.title("MP4 Batch Processor")
-        self.geometry("900x900")
+        self.geometry("1000x1000")  # Back to original width since no sidebar
+        self.minsize(1000, 1000)
         self.configure(bg="#1a1a1a")
         
         # Reference to the main application controller
@@ -42,13 +44,21 @@ class BatchProcessorUI(TkinterDnD.Tk):
         
         # Initialize duration display variable
         default_duration = self.settings_manager.get("ui.loop_duration", "3600")
-        self.duration_display_var = tk.StringVar(value=self._format_duration_display(int(default_duration)))
+        h, m, s = format_duration(int(default_duration))
+        display_text = ""
+        if h > 0: display_text += f"{h}h "
+        if m > 0 or (h > 0 and s > 0): display_text += f"{m}m "
+        if s > 0 or (h == 0 and m == 0): display_text += f"{s}s"
+        self.duration_display_var = tk.StringVar(value=f"({display_text.strip()})") 
+        
+        # Create detached utility window (initially hidden)
+        self.utility_window = None
         
         # Create and lay out the UI components
         self.create_ui()
         
-        # Apply window settings
-        self.apply_window_settings()
+        # Create utility window after main UI is ready
+        self.after(500, self.create_utility_window)
         
         # Center window on screen
         self.after(100, lambda: center_window(self))
@@ -56,55 +66,191 @@ class BatchProcessorUI(TkinterDnD.Tk):
         # Set up close protocol
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    def apply_window_settings(self):
-        """Apply saved window settings"""
+    def create_utility_window(self):
+        """Create the detached utility window"""
         try:
-            # Apply saved geometry
-            saved_geometry = self.settings_manager.get("ui.window_geometry")
-            if saved_geometry and isinstance(saved_geometry, str):
-                self.geometry(saved_geometry)
-            
-            # Apply saved position (after a short delay to ensure window is ready)
-            saved_position = self.settings_manager.get("ui.window_position")
-            if saved_position and isinstance(saved_position, str):
-                try:
-                    x, y = map(int, saved_position.split(','))
-                    self.after(200, lambda: self.geometry(f"+{x}+{y}"))
-                except ValueError:
-                    pass  # Invalid position format
-                    
+            self.utility_window = create_utility_window(self, self.controller)
+            # Start hidden - user can show it with the button
+            self.utility_window.withdraw()
+            logging.info("Utility window created (hidden)")
         except Exception as e:
-            logging.debug(f"Could not apply window settings: {e}")
-
-    def _format_duration_display(self, seconds):
-        """Format seconds into readable duration"""
-        h = seconds // 3600
-        m = (seconds % 3600) // 60
-        s = seconds % 60
-        
-        display_text = ""
-        if h > 0:
-            display_text += f"{h}h "
-        if m > 0 or (h > 0 and s > 0):
-            display_text += f"{m}m "
-        if s > 0 or (h == 0 and m == 0):
-            display_text += f"{s}s"
-        
-        return f"({display_text.strip()})"
+            logging.error(f"Error creating utility window: {e}")
 
     def create_ui(self):
+        import os
+import threading
+import logging
+import re
+import tkinter as tk
+import customtkinter as ctk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
+from tkinterdnd2 import TkinterDnD, DND_FILES
+
+from help_window import HelpWindow
+from utils import center_window, format_duration
+from utility_window import create_utility_window  # NEW IMPORT
+
+from settings_manager import get_settings
+
+# Configure UI Theme
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("dark-blue")
+
+class BatchProcessorUI(TkinterDnD.Tk):
+    def __init__(self, app_controller):
+        super().__init__()
+        self.title("MP4 Batch Processor")
+        self.geometry("1000x1000")  # Back to original width since no sidebar
+        self.minsize(1000, 1000)
+        self.configure(bg="#1a1a1a")
+        
+        # Reference to the main application controller
+        self.controller = app_controller
+        
+        # Get settings manager reference
+        self.settings_manager = get_settings()
+        
+        # UI state variables
+        self.file_paths = []
+        self.rendering = False
+        self.was_stopped = False
+        self.current_file_index = -1
+        self.folder_labels = []
+        self.output_preview_labels = []
+        self.selected_file = None
+        
+        # Initialize duration display variable
+        default_duration = self.settings_manager.get("ui.loop_duration", "3600")
+        self.duration_display_var = tk.StringVar(value=format_duration(int(default_duration)))
+        
+        # Create detached utility window (initially hidden)
+        self.utility_window = None
+        
+        # Create and lay out the UI components
+        self.create_ui()
+
+        # Set up focus handling for Alt+Tab
+        self.bind("<FocusIn>", self.on_main_focus_in)
+        self.bind("<FocusOut>", self.on_main_focus_out)
+        
+        # Track if utility was visible before losing focus
+        self._utility_was_visible = False
+
+        # Create utility window after main UI is ready
+        self.after(500, self.create_utility_window)
+        
+        # Center window on screen
+        self.after(100, lambda: center_window(self))
+        
+        # Set up close protocol
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def create_utility_window(self):
+        """Create the detached utility window"""
+        try:
+            self.utility_window = create_utility_window(self, self.controller)
+            # Start hidden - user can show it with the button
+            self.utility_window.withdraw()
+            logging.info("Utility window created (hidden)")
+        except Exception as e:
+            logging.error(f"Error creating utility window: {e}")
+
+    def create_ui(self):
+        # UPDATED: Back to single column layout (no sidebar)
+        
         # Main container with padding
         main_container = ctk.CTkFrame(self, fg_color="transparent")
         main_container.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
         
-        # Use grid system with incremental rows
+        # Configure main container grid
         main_container.grid_columnconfigure(0, weight=1)
+        main_container.grid_rowconfigure(0, weight=0)  # Top bar - fixed
+        main_container.grid_rowconfigure(1, weight=0)  # Stats - fixed
+        main_container.grid_rowconfigure(2, weight=1)  # Drop area - EXPANDABLE
+        main_container.grid_rowconfigure(3, weight=0)  # File buttons - fixed
+        main_container.grid_rowconfigure(4, weight=0)  # Duration - fixed
+        main_container.grid_rowconfigure(5, weight=0)  # Folders - fixed
+        main_container.grid_rowconfigure(6, weight=0)  # Sheet - fixed
+        main_container.grid_rowconfigure(7, weight=0)  # Options - fixed
+        main_container.grid_rowconfigure(8, weight=0)  # Controls - fixed
+        main_container.grid_rowconfigure(9, weight=0)  # Progress - fixed
+        
         r = 0  # Start row counter
         
-        # === Drag and Drop Zone ===
-        # Create a frame for stats above the drop zone
+        # === Top Bar with User Info, Logout, and Utility Button ===
+        top_bar = ctk.CTkFrame(main_container, fg_color="#1a1a1a", height=50)
+        top_bar.grid(row=r, column=0, sticky="ew", pady=(0, 10), padx=5)
+        top_bar.grid_propagate(False)
+        r += 1
+        
+        # Left side - App title
+        left_section = ctk.CTkFrame(top_bar, fg_color="transparent")
+        left_section.pack(side="left", fill="y", padx=10)
+        
+        app_title = ctk.CTkLabel(
+            left_section,
+            text="🎬 MP4 Looper",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#00bfff"
+        )
+        app_title.pack(side="left", pady=15)
+        
+        # NEW: Utility window toggle button (left side, after title)
+        self.utility_toggle_button = ctk.CTkButton(
+            left_section,
+            text="🔧",
+            command=self.toggle_utility_window,
+            width=30,
+            height=30,
+            fg_color="transparent",
+            hover_color="#404040",
+            font=ctk.CTkFont(size=12)
+        )
+        self.utility_toggle_button.pack(side="left", padx=(20, 0), pady=15)
+        
+        # Right side - User info and logout
+        right_section = ctk.CTkFrame(top_bar, fg_color="transparent")
+        right_section.pack(side="right", fill="y", padx=10)
+        
+        # Get current user email
+        try:
+            from auth_module.email_auth import get_current_user
+            current_user = get_current_user()
+            user_display = current_user if current_user else "Unknown User"
+            
+            # Truncate long emails
+            if len(user_display) > 25:
+                user_display = user_display[:22] + "..."
+                
+        except Exception:
+            user_display = "User"
+        
+        # User info label
+        user_label = ctk.CTkLabel(
+            right_section,
+            text=f"👤 {user_display}",
+            font=ctk.CTkFont(size=12),
+            text_color="#aaa"
+        )
+        user_label.pack(side="left", pady=15, padx=(0, 10))
+        
+        # Logout button
+        self.logout_button = ctk.CTkButton(
+            right_section,
+            text="🚪 Logout",
+            command=self.logout_user,
+            width=80,
+            height=30,
+            fg_color="#dc3545",
+            hover_color="#c82333",
+            font=ctk.CTkFont(size=11)
+        )
+        self.logout_button.pack(side="right", pady=10)
+        
+        # === Stats Frame ===
         stats_frame = ctk.CTkFrame(main_container, fg_color="transparent", height=30)
         stats_frame.grid(row=r, column=0, sticky="ew", pady=(0, 5), padx=5)
         r += 1
@@ -118,26 +264,29 @@ class BatchProcessorUI(TkinterDnD.Tk):
                                     text_color="#aaa", font=("Segoe UI", 12))
         self.count_label.pack(side="right")
         
-        # Create the drop area with darker background - INCREASE MINIMUM HEIGHT
-        self.drop_area = ctk.CTkFrame(main_container, fg_color="#1e1e1e", corner_radius=10, height=300)
+        # === Drop Area - SAME AS BEFORE ===
+        self.drop_area = ctk.CTkFrame(main_container, fg_color="#1e1e1e", corner_radius=10)
         self.drop_area.grid(row=r, column=0, sticky="nsew", pady=(0, 10), padx=5)
-        main_container.grid_rowconfigure(r, weight=1)  # Make this row expandable
-        
-        # Add minimum size constraint 
-        self.drop_area.grid_propagate(False)  # Prevent from shrinking below specified size
         r += 1
         
-        # Split the drop area into two columns
+        # Configure drop area grid
+        self.drop_area.grid_columnconfigure(0, weight=1)
+        self.drop_area.grid_rowconfigure(0, weight=1)
+        
+        # Drop area content - using grid instead of pack
         drop_area_content = ctk.CTkFrame(self.drop_area, fg_color="transparent")
-        drop_area_content.pack(fill="both", expand=True, padx=10, pady=10)
+        drop_area_content.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         drop_area_content.grid_columnconfigure(0, weight=1)
         drop_area_content.grid_columnconfigure(1, weight=1)
         drop_area_content.grid_rowconfigure(0, weight=1)
         
-        # Left side - File queue - INCREASE MINIMUM HEIGHT
-        drop_zone_left = ctk.CTkFrame(drop_area_content, fg_color="#232323", corner_radius=8, height=250)
+        # Left side - Raw Preview
+        drop_zone_left = ctk.CTkFrame(drop_area_content, fg_color="#232323", corner_radius=8)
         drop_zone_left.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-        drop_zone_left.grid_propagate(False)  # Prevent from shrinking
+        drop_zone_left.grid_columnconfigure(0, weight=1)
+        drop_zone_left.grid_rowconfigure(0, weight=0)  # Header - fixed
+        drop_zone_left.grid_rowconfigure(1, weight=0)  # Drop indicator - fixed
+        drop_zone_left.grid_rowconfigure(2, weight=1)  # File list - expandable
         
         # Header for raw preview
         raw_header = ctk.CTkLabel(
@@ -146,22 +295,29 @@ class BatchProcessorUI(TkinterDnD.Tk):
             text_color="#00bfff",
             font=("Segoe UI", 14, "bold")
         )
-        raw_header.pack(pady=(10, 5))
+        raw_header.grid(row=0, column=0, pady=(10, 5), sticky="ew")
 
-        # Add drop indicator with reduced height and better positioning
-        self.drop_indicator = ctk.CTkLabel(drop_zone_left, text="🡇 Drag video files or folders here 🡇",
-                                    fg_color="transparent", text_color="#00bfff",
-                                    font=("Segoe UI", 16, "bold"), height=60)  # Reduced height
-        self.drop_indicator.pack(expand=True, fill="both", pady=20)  # Use pack instead of place
+        # Drop indicator
+        self.drop_indicator = ctk.CTkLabel(
+            drop_zone_left, 
+            text="🡇 Drag video files or folders here 🡇",
+            fg_color="transparent", 
+            text_color="#00bfff",
+            font=("Segoe UI", 16, "bold"), 
+            height=60
+        )
+        self.drop_indicator.grid(row=1, column=0, pady=10, sticky="ew")
         
-        # Create a scrollable frame for showing added files with explicit size
-        self.folder_frame = ctk.CTkScrollableFrame(drop_zone_left, fg_color="transparent", height=180)
-        self.folder_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        # Scrollable frame for files
+        self.folder_frame = ctk.CTkScrollableFrame(drop_zone_left, fg_color="transparent")
+        self.folder_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
 
-        # Right side - Output preview - INCREASE MINIMUM HEIGHT
-        drop_zone_right = ctk.CTkFrame(drop_area_content, fg_color="#232323", corner_radius=8, height=250)
+        # Right side - Output Preview
+        drop_zone_right = ctk.CTkFrame(drop_area_content, fg_color="#232323", corner_radius=8)
         drop_zone_right.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-        drop_zone_right.grid_propagate(False)  # Prevent from shrinking
+        drop_zone_right.grid_columnconfigure(0, weight=1)
+        drop_zone_right.grid_rowconfigure(0, weight=0)  # Header - fixed
+        drop_zone_right.grid_rowconfigure(1, weight=1)  # Output list - expandable
 
         # Header for output preview
         output_header = ctk.CTkLabel(
@@ -170,62 +326,39 @@ class BatchProcessorUI(TkinterDnD.Tk):
             text_color="#00bfff",
             font=("Segoe UI", 14, "bold")
         )
-        output_header.pack(pady=(10, 5))
+        output_header.grid(row=0, column=0, pady=(10, 5), sticky="ew")
         
-        # Create a scrollable frame for showing output file names with explicit size
-        self.output_preview_frame = ctk.CTkScrollableFrame(drop_zone_right, fg_color="transparent", height=180)
-        self.output_preview_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-
-        # Register the drop zone and indicator for drag and drop
+        # Scrollable frame for output files
+        self.output_preview_frame = ctk.CTkScrollableFrame(drop_zone_right, fg_color="transparent")
+        self.output_preview_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        
+        # Register drop events
         drop_zone_left.drop_target_register(DND_FILES)
         drop_zone_left.dnd_bind("<<Drop>>", self.on_drop)
         self.drop_indicator.drop_target_register(DND_FILES)
         self.drop_indicator.dnd_bind("<<Drop>>", self.on_drop)
         
-        # Change style when hovering over drop zone
+        # Hover effects
         drop_zone_left.bind("<Enter>", lambda e: drop_zone_left.configure(fg_color="#2a2a2a"))
         drop_zone_left.bind("<Leave>", lambda e: drop_zone_left.configure(fg_color="#232323"))
         
-        # Right side - Output preview
-        drop_zone_right = ctk.CTkFrame(drop_area_content, fg_color="#232323", corner_radius=8)
-        drop_zone_right.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-
-        # Header for output preview
-        output_header = ctk.CTkLabel(
-            drop_zone_right, 
-            text="Output Preview", 
-            text_color="#00bfff",
-            font=("Segoe UI", 14, "bold")
-        )
-        output_header.pack(pady=(10, 5))
-        
-        drop_zone_right.pack_propagate(False)
-
-        # Create a scrollable frame for showing output file names
-        self.output_preview_frame = ctk.CTkScrollableFrame(drop_zone_right, fg_color="transparent")
-        self.output_preview_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Synchronize scrolling
+        # Synchronized scrolling
         def _on_mousewheel(event):
-            # Scroll both frames together
             self.folder_frame._parent_canvas.yview_scroll(int(-1*(event.delta/20)), "units")
             self.output_preview_frame._parent_canvas.yview_scroll(int(-1*(event.delta/20)), "units")
-            return "break"  # Prevent default scrolling
+            return "break"
 
-        # Bind the mousewheel event to both frames
         self.folder_frame.bind_all("<MouseWheel>", _on_mousewheel)
 
-        # File management buttons frame
+        # === File Management Buttons ===
         file_buttons_frame = ctk.CTkFrame(main_container, fg_color="transparent")
         file_buttons_frame.grid(row=r, column=0, sticky="ew", pady=5)
         r += 1
         
-        # Evenly distribute file management buttons
         file_buttons_frame.grid_columnconfigure(0, weight=1)
         file_buttons_frame.grid_columnconfigure(1, weight=1)
         file_buttons_frame.grid_columnconfigure(2, weight=1)
         
-        # Add Browse Files button
         browse_button = ctk.CTkButton(
             file_buttons_frame,
             text="Browse Files",
@@ -233,33 +366,30 @@ class BatchProcessorUI(TkinterDnD.Tk):
         )
         browse_button.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
         
-        # Add Clear Queue button
         self.clear_button = ctk.CTkButton(
             file_buttons_frame,
             text="🗑 Clear Queue",
             command=self.clear_queue,
-            fg_color="#6c757d",  # Gray
+            fg_color="#6c757d",
             hover_color="#5a6268"
         )
         self.clear_button.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
         
-        # Add Remove Selected button
         self.remove_selected_button = ctk.CTkButton(
             file_buttons_frame,
             text="Remove Selected",
             command=self.remove_selected_file,
-            fg_color="#dc3545",  # Red
+            fg_color="#dc3545",
             hover_color="#c82333",
-            state="disabled"  # Initially disabled
+            state="disabled"
         )
         self.remove_selected_button.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
         
         # === Duration Input ===
-        # Use the improved duration section that contains duration_display_var
         self.create_duration_section(main_container, r)
         r += 1
         
-        # Output folder section
+        # === Output and Music Folders ===
         folder_frame = ctk.CTkFrame(main_container)
         folder_frame.grid(row=r, column=0, sticky="ew", pady=10)
         r += 1
@@ -298,7 +428,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
         music_open = ctk.CTkButton(music_row, text="Open", width=80, command=self.open_music)
         music_open.pack(side="left", padx=5)
         
-        # Google Sheet section
+        # === Google Sheet Section ===
         sheet_frame = ctk.CTkFrame(main_container)
         sheet_frame.grid(row=r, column=0, sticky="ew", pady=10)
         r += 1
@@ -319,7 +449,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
         self.sheet_entry = ctk.CTkEntry(sheet_row)
         self.sheet_entry.pack(side="left", padx=5, fill="x", expand=True)
         
-        # Options section
+        # === Options Section ===
         options_frame = ctk.CTkFrame(main_container)
         options_frame.grid(row=r, column=0, sticky="ew", pady=10)
         r += 1
@@ -375,17 +505,25 @@ class BatchProcessorUI(TkinterDnD.Tk):
         )
         self.auto_upload_checkbox.pack(side="left")
         
-        # Control buttons
+        # === Control Buttons ===
         control_frame = ctk.CTkFrame(main_container)
         control_frame.grid(row=r, column=0, sticky="ew", pady=10)
         r += 1
+
+        self.distribution_button = ctk.CTkButton(
+            control_frame,
+            text="🎵 Song Distribution",
+            command=self.show_distribution_modal,
+            fg_color="#e67e22",
+            hover_color="#d35400"
+        )
+        self.distribution_button.pack(side="left", padx=5, fill="x", expand=True)
         
-        # Use horizontal layout for controls with modern styling
         self.start_button = ctk.CTkButton(
             control_frame,
             text="▶ Start Processing",
             command=self.start_processing,
-            fg_color="#28a745",  # Green
+            fg_color="#28a745",
             hover_color="#218838"
         )
         self.start_button.pack(side="left", padx=5, fill="x", expand=True)
@@ -395,7 +533,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
             text="⏹ Stop",
             command=self.stop_processing,
             state="disabled",
-            fg_color="#dc3545",  # Red
+            fg_color="#dc3545",
             hover_color="#c82333"
         )
         self.stop_button.pack(side="left", padx=5, fill="x", expand=True)
@@ -403,18 +541,17 @@ class BatchProcessorUI(TkinterDnD.Tk):
         self.upload_button = ctk.CTkButton(
             control_frame,
             text="📤 Upload to Drive",
-            command=self.upload_to_drive,  # This should call the method above
-            fg_color="#17a2b8",  # Teal
+            command=self.upload_to_drive,
+            fg_color="#17a2b8",
             hover_color="#138496"
         )
         self.upload_button.pack(side="left", padx=5, fill="x", expand=True)
         
-        # Progress tracking
+        # === Progress Tracking ===
         progress_frame = ctk.CTkFrame(main_container)
         progress_frame.grid(row=r, column=0, sticky="ew", pady=10)
         r += 1
         
-        # Modernized progress bar style
         style = ttk.Style()
         style.configure("TProgressbar", 
                         thickness=10, 
@@ -433,89 +570,74 @@ class BatchProcessorUI(TkinterDnD.Tk):
         )
         self.progress_label.pack(pady=5)
         
-        # Debug section with better layout
-        debug_frame = ctk.CTkFrame(main_container)
-        debug_frame.grid(row=r, column=0, sticky="ew", pady=10)
-        r += 1
-
-        # Create a sub-frame to hold the buttons in a row with equal width
-        buttons_frame = ctk.CTkFrame(debug_frame, fg_color="transparent")
-        buttons_frame.pack(fill="x", expand=True)
-        
-        # Check if user is admin BEFORE creating the grid
-        is_admin = False
-        try:
-            is_admin = self.controller.is_admin_user()
-            logging.debug(f"Admin check result: {is_admin}")
-        except Exception as e:
-            logging.error(f"Error checking admin status: {e}")
-        
-        # Configure columns based on admin status
-        if is_admin:
-            # 5 columns for admin users
-            for i in range(5):
-                buttons_frame.columnconfigure(i, weight=1)
-        else:
-            # 4 columns for regular users
-            for i in range(4):
-                buttons_frame.columnconfigure(i, weight=1)
-
-        # Create buttons
-        self.debug_button = ctk.CTkButton(
-            buttons_frame,
-            text="Show Debug Log",
-            command=self.show_debug_log,
-            fg_color="#6c757d",
-            hover_color="#5a6268"
-        )
-        self.debug_button.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
-
-        self.clean_uploads_button = ctk.CTkButton(
-            buttons_frame,
-            text="Clean Canceled Uploads",
-            command=self.clean_canceled_uploads,
-            fg_color="#6c757d",
-            hover_color="#5a6268"
-        )
-        self.clean_uploads_button.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-
-        self.send_debug_button = ctk.CTkButton(
-            buttons_frame,
-            text="📤 Send Debug Info",
-            command=self.send_debug_info,
-            fg_color="#17a2b8",
-            hover_color="#138496"
-        )
-        self.send_debug_button.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
-
-        self.help_button = ctk.CTkButton(
-            buttons_frame,
-            text="❓ Help",
-            command=self.show_help,
-            fg_color="#6c757d",
-            hover_color="#5a6268"
-        )
-        self.help_button.grid(row=0, column=3, padx=5, pady=5, sticky="ew")
-
-        # Admin-only monitor button
-        if is_admin:
-            self.monitor_button = ctk.CTkButton(
-                buttons_frame,
-                text="📊 Monitor",
-                command=self.show_admin_monitoring,
-                fg_color="#e67e22",  # Orange color to make it stand out
-                hover_color="#d35400"
-            )
-            self.monitor_button.grid(row=0, column=4, padx=5, pady=5, sticky="ew")
-            logging.info("Admin monitoring button created and visible")
-        else:
-            logging.debug("User is not admin - monitor button not created")
-        
-        # Initialize the missing attribute for showing current file
+        # Initialize missing attributes
         self.current_file_var = tk.StringVar(value="")
         
-        # Create a context menu for file management
+        # Create context menu
         self.create_context_menu()
+
+        # ADDED: Configure upload access based on admin status
+        self._configure_upload_access()
+
+    def on_main_focus_in(self, event):
+        """Handle main window getting focus"""
+        logging.debug("🔥 Main window gained focus")
+        
+        # If utility window was visible before, show it again
+        if (hasattr(self, 'utility_window') and 
+            self.utility_window and 
+            hasattr(self, '_utility_was_visible') and 
+            self._utility_was_visible):
+            
+            try:
+                self.after(200, lambda: self.utility_window.show_window())
+                logging.debug("Restoring utility window visibility")
+            except Exception as e:
+                logging.error(f"Error restoring utility window: {e}")
+
+    def on_main_focus_out(self, event):
+        """Handle main window losing focus"""
+        logging.debug("🔥 Main window lost focus")
+        
+        # Remember if utility window was visible
+        if hasattr(self, 'utility_window') and self.utility_window:
+            try:
+                self._utility_was_visible = self.utility_window.winfo_viewable()
+                logging.debug(f"Utility was visible: {self._utility_was_visible}")
+            except Exception as e:
+                logging.error(f"Error checking utility visibility: {e}")
+                self._utility_was_visible = False
+
+    def toggle_utility_window(self):
+        """Toggle the utility window visibility - UPDATED VERSION"""
+        try:
+            if self.utility_window:
+                # Check if window exists and is visible
+                try:
+                    if self.utility_window.winfo_viewable():
+                        self.utility_window.hide_window()
+                        self.utility_toggle_button.configure(fg_color="transparent")
+                        self._utility_was_visible = False
+                    else:
+                        self.utility_window.show_window()
+                        self.utility_toggle_button.configure(fg_color="#28a745")
+                        self._utility_was_visible = True
+                except tk.TclError:
+                    # Window was destroyed, recreate it
+                    self.create_utility_window()
+                    if self.utility_window:
+                        self.utility_window.show_window()
+                        self.utility_toggle_button.configure(fg_color="#28a745")
+                        self._utility_was_visible = True
+            else:
+                # Create window if it doesn't exist
+                self.create_utility_window()
+                if self.utility_window:
+                    self.utility_window.show_window()
+                    self.utility_toggle_button.configure(fg_color="#28a745")
+                    self._utility_was_visible = True
+        except Exception as e:
+            logging.error(f"Error toggling utility window: {e}")
 
     # The create_duration_section method is now called in the create_ui method
     def create_duration_section(self, main_container, r):
@@ -651,7 +773,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
 
     def update_duration_display(self, seconds):
         """Update the display showing the duration in h:m:s format"""
-        h, m, s = self.format_duration_display(seconds)
+        h, m, s = format_duration(seconds)  # Use utils version
         
         # Create display text
         display_text = ""
@@ -664,13 +786,6 @@ class BatchProcessorUI(TkinterDnD.Tk):
         
         # Update the display
         self.duration_display_var.set(f"({display_text.strip()})")
-
-    def format_duration_display(self, seconds):
-        """Format seconds into hours, minutes, seconds for display"""
-        h = seconds // 3600
-        m = (seconds % 3600) // 60
-        s = seconds % 60
-        return h, m, s
 
     def show_help(self):
         """Show the help window"""
@@ -710,9 +825,9 @@ class BatchProcessorUI(TkinterDnD.Tk):
         if duplicates:
             messagebox.showinfo("Some Items Skipped", "Some items were already in the queue.")
 
-        # Hide the drop indicator only when first items are being added
-        if not self.file_paths and new_items:
-            self.drop_indicator.place_forget()
+        # FIXED: Hide the drop indicator when files are added
+        if new_items:
+            self.drop_indicator.grid_forget()
 
         self.file_paths.extend(new_items)
         
@@ -756,9 +871,9 @@ class BatchProcessorUI(TkinterDnD.Tk):
         # Update the file count
         self.update_file_count()
         
-        # Hide the drop indicator if first files are being added
-        if len(self.file_paths) == len(new_items):
-            self.drop_indicator.place_forget()
+        # FIXED: Hide the drop indicator when files are added
+        if new_items:
+            self.drop_indicator.grid_forget()
         
         # Update both file displays
         self.update_file_display()
@@ -1022,13 +1137,25 @@ class BatchProcessorUI(TkinterDnD.Tk):
             self.update_file_count()
             self.current_file_var.set("")
             
-            # Show the drop indicator again
-            self.drop_indicator.place(relx=0.5, rely=0.5, anchor="center")
+            # FIXED: Show the drop indicator again when queue is empty
+            self.drop_indicator.grid(row=1, column=0, pady=20, sticky="ew")
+            
+            # Deselect any selected file
+            self.deselect_file()
             
             logging.info("Queue cleared")
         
     def upload_to_drive(self, only_file=None):
-        """Handle the upload button click"""
+        """Handle the upload button click - Admin only"""
+        # Check admin status first
+        if not self._is_current_user_admin():
+            messagebox.showwarning(
+                "Access Denied", 
+                "Upload to Drive feature is only available to administrators.",
+                parent=self
+            )
+            return
+        
         # Get the output folder
         output_folder = self.output_entry.get().strip()
         
@@ -1041,32 +1168,22 @@ class BatchProcessorUI(TkinterDnD.Tk):
         self.controller.upload_to_drive(output_folder, only_file)
 
     def apply_settings(self, settings_dict):
-        """Apply settings to UI elements - UPDATED METHOD"""
+        """Apply settings to UI components - SIMPLIFIED VERSION"""
         try:
-            # Output folder
+            # Use settings manager directly instead of duplicating logic
             if "output_folder" in settings_dict:
                 self.output_entry.delete(0, tk.END)
                 self.output_entry.insert(0, settings_dict["output_folder"])
                 
-            # Music folder
             if "music_folder" in settings_dict:
                 self.music_entry.delete(0, tk.END)
                 self.music_entry.insert(0, settings_dict["music_folder"])
                 
-            # Duration
             if "loop_duration" in settings_dict:
-                duration_str = str(settings_dict["loop_duration"])
                 self.duration_input.delete(0, tk.END)
-                self.duration_input.insert(0, duration_str)
-                try:
-                    duration = int(duration_str)
-                    self.update_duration_display(duration)
-                except ValueError:
-                    self.duration_input.delete(0, tk.END)
-                    self.duration_input.insert(0, "3600")
-                    self.update_duration_display(3600)
+                self.duration_input.insert(0, str(settings_dict["loop_duration"]))
+                self.update_duration_display(int(settings_dict.get("loop_duration", 3600)))
                 
-            # Google Sheet settings
             if "sheet_url" in settings_dict:
                 self.sheet_entry.delete(0, tk.END)
                 self.sheet_entry.insert(0, settings_dict["sheet_url"])
@@ -1074,7 +1191,6 @@ class BatchProcessorUI(TkinterDnD.Tk):
             if "sheet_preset" in settings_dict and settings_dict["sheet_preset"] in self.controller.get_sheet_presets():
                 self.sheet_dropdown.set(settings_dict["sheet_preset"])
                 
-            # Processing settings
             if "use_default_song_count" in settings_dict:
                 self.use_default_song_count.set(settings_dict["use_default_song_count"])
                 
@@ -1090,9 +1206,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
             if "auto_upload" in settings_dict:
                 self.auto_upload_var.set(settings_dict["auto_upload"])
                 
-            # Update UI state based on settings
             self.toggle_song_count()
-            
             logging.debug("Settings applied to UI successfully")
             
         except Exception as e:
@@ -1100,7 +1214,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
 
     # 2. Modify the get_current_settings method to include auto_upload (if not already present)
     def get_current_settings(self):
-        """Get current settings from UI elements - UPDATED METHOD"""
+        """Get current settings from UI elements - SIMPLIFIED VERSION"""
         try:
             return {
                 "output_folder": self.output_entry.get().strip(),
@@ -1118,116 +1232,40 @@ class BatchProcessorUI(TkinterDnD.Tk):
             logging.error(f"Error getting current settings: {e}")
             return {}
 
-    def save_current_ui_state(self):
-        """Save current UI state to settings manager"""
-        try:
-            current_settings = self.get_current_settings()
-            
-            # Save to settings manager
-            self.settings_manager.update_section('ui', {
-                'output_folder': current_settings['output_folder'],
-                'music_folder': current_settings['music_folder'],
-                'loop_duration': current_settings['loop_duration']
-            })
-            
-            self.settings_manager.update_section('sheets', {
-                'sheet_url': current_settings['sheet_url'],
-                'sheet_preset': current_settings['sheet_preset']
-            })
-            
-            self.settings_manager.update_section('processing', {
-                'use_default_song_count': current_settings['use_default_song_count'],
-                'default_song_count': current_settings['default_song_count'],
-                'fade_audio': current_settings['fade_audio'],
-                'export_timestamp': current_settings['export_timestamp'],
-                'auto_upload': current_settings['auto_upload']
-            })
-            
-            logging.debug("UI state saved to settings manager")
-            
-        except Exception as e:
-            logging.error(f"Error saving UI state: {e}")
-
-    def on_setting_changed(self, setting_key, value):
-        """Handle individual setting changes - NEW METHOD"""
-        try:
-            # Map UI events to settings keys
-            key_mapping = {
-                'output_folder': 'ui.output_folder',
-                'music_folder': 'ui.music_folder',
-                'duration': 'ui.loop_duration',
-                'sheet_url': 'sheets.sheet_url',
-                'sheet_preset': 'sheets.sheet_preset',
-                'fade_audio': 'processing.fade_audio',
-                'auto_upload': 'processing.auto_upload'
-            }
-            
-            settings_key = key_mapping.get(setting_key, setting_key)
-            self.settings_manager.set(settings_key, value)
-            
-            # Notify controller if needed
-            if hasattr(self.controller, 'on_setting_changed'):
-                self.controller.on_setting_changed(setting_key, value)
-                
-        except Exception as e:
-            logging.error(f"Error handling setting change {setting_key}: {e}")
-
     def on_close(self):
-        """Handle window close event - UPDATED METHOD"""
+        """Handle window close event - SIMPLIFIED VERSION"""
         if self.rendering:
             if not messagebox.askyesno("Confirm Exit", "Processing is in progress. Are you sure you want to exit?"):
                 return
-            
-            # Stop processing
             self.stop_processing()
         
         try:
-            # Save current UI state before closing
-            self.save_current_ui_state()
+            # Save current settings using settings manager directly
+            current_settings = self.get_current_settings()
+            for key, value in current_settings.items():
+                if key in ["output_folder", "music_folder", "loop_duration"]:
+                    self.settings_manager.set(f"ui.{key}", value)
+                elif key in ["sheet_url", "sheet_preset"]:
+                    self.settings_manager.set(f"sheets.{key}", value)
+                elif key in ["use_default_song_count", "default_song_count", "fade_audio", "export_timestamp", "auto_upload"]:
+                    self.settings_manager.set(f"processing.{key}", value)
             
-            # Save window geometry and position
-            if self.settings_manager.get("advanced.track_window_position", True):
+            # Close utility window
+            if self.utility_window:
                 try:
-                    geometry = self.geometry()
-                    self.settings_manager.set("ui.window_geometry", geometry, save=False)
+                    self.utility_window.following_active = False
+                    self.utility_window.destroy()
+                except Exception:
+                    pass
                     
-                    x = self.winfo_rootx()
-                    y = self.winfo_rooty()
-                    self.settings_manager.set("ui.window_position", f"{x},{y}")
-                    
-                except Exception as e:
-                    logging.debug(f"Could not save window position: {e}")
-            
-            # Cleanup any pending callbacks
-            all_after = self.tk.call('after', 'info')
-            if all_after:
-                for after_id in all_after:
-                    try:
-                        self.after_cancel(after_id)
-                    except Exception:
-                        pass
-                        
-            # Clean up any scaling tracker
-            import customtkinter as ctk
-            for obj_name in dir(ctk):
-                if "tracking" in obj_name.lower():
-                    attr = getattr(ctk, obj_name, None)
-                    if attr and callable(getattr(attr, "stop", None)):
-                        try:
-                            attr.stop()
-                        except Exception:
-                            pass
-                            
         except Exception as e:
             logging.error(f"Error during window close: {e}")
         
-        # Destroy window
         try:
             self.destroy()
         except Exception:
-            # Just ignore any errors during window destruction
             import sys
-            sys.exit(0)  # Force exit cleanly
+            sys.exit(0)
 
     def on_close_handler(self):
         """Handle application close - save settings"""
@@ -1284,16 +1322,17 @@ class BatchProcessorUI(TkinterDnD.Tk):
         # Deselect any selected file first
         self.deselect_file()
         
-        # If no files, show the drop indicator
+        # FIXED: Always check if we should show/hide the drop indicator
         if not self.file_paths:
-            # Use pack to show the drop indicator instead of place
-            self.drop_indicator.pack(expand=True, fill="both", pady=20)
+            # Show the drop indicator when no files
+            self.drop_indicator.grid(row=1, column=0, pady=20, sticky="ew")
             self.remove_selected_button.configure(state="disabled")
             return
         else:
-            # Hide the drop indicator using pack_forget instead of place_forget
-            self.drop_indicator.pack_forget()
+            # Hide the drop indicator when files exist
+            self.drop_indicator.grid_forget()
         
+        # Rest of the method stays the same...
         # Get the current duration for output file naming
         duration = 600  # Default to 600s (10m)
         if self.duration_input.get().isdigit():
@@ -1477,6 +1516,10 @@ class BatchProcessorUI(TkinterDnD.Tk):
         # Update UI
         self.update_file_count()
         self.update_file_display()
+        
+        # FIXED: Show drop indicator if queue becomes empty
+        if not self.file_paths:
+            self.drop_indicator.grid(row=1, column=0, pady=20, sticky="ew")
 
     def setup_validated_entry(self, parent, label_text, entry_var=None, callback=None):
         """Create a standardized entry with validation"""
@@ -1664,55 +1707,22 @@ class BatchProcessorUI(TkinterDnD.Tk):
     
     # Event handlers
     def on_output_folder_change(self, event=None):
-        """Handle output folder path change"""
+        """Handle output folder change"""
         path = self.output_entry.get().strip()
-        result = self.validate_path(
-            path, 
-            self.validate_output_folder,
-            "output_folder", 
-            self.output_entry,
-            success_message=None,  # No message for success
-            error_message=f"The folder '{path}' is invalid or not writable.\nPlease check the path and try again."
-        )
-    
+        if path:
+            self.settings_manager.set("ui.output_folder", path)
+
     def on_music_folder_change(self, event=None):
-        """Handle music folder path change"""
+        """Handle music folder change"""
         path = self.music_entry.get().strip()
-        result = self.validate_path(
-            path, 
-            self.validate_music_folder,
-            "music_folder", 
-            self.music_entry,
-            error_message=f"The folder '{path}' is invalid or doesn't exist.\nPlease check the path and try again."
-        )
-        
-        if result and isinstance(result, tuple) and len(result) >= 3:
-            _, has_wav_files, subdirs_with_wav = result
-            
-            # Show warning if no WAV files at root level
-            if not has_wav_files:
-                if subdirs_with_wav:
-                    top_subdirs = subdirs_with_wav[:5]
-                    more_count = len(subdirs_with_wav) - 5 if len(subdirs_with_wav) > 5 else 0
-                    
-                    subdirs_text = "\n".join(str(d) for d in top_subdirs)
-                    if more_count:
-                        subdirs_text += f"\n... and {more_count} more"
-                    
-                    messagebox.showinfo(
-                        "WAV Files in Subdirectories", 
-                        f"No WAV files found at the root level of the selected folder.\n\n"
-                        f"However, WAV files were found in these subdirectories:\n\n"
-                        f"{subdirs_text}", 
-                        parent=self
-                    )
-                else:
-                    messagebox.showwarning(
-                        "No WAV Files", 
-                        f"The folder '{path}' doesn't contain any WAV files.\n"
-                        "Please select a folder containing WAV files.", 
-                        parent=self
-                    )
+        if path:
+            self.settings_manager.set("ui.music_folder", path)
+
+    def on_duration_change(self, event=None):
+        """Handle duration change"""
+        duration = self.duration_input.get().strip()
+        if duration.isdigit():
+            self.settings_manager.set("ui.loop_duration", duration)
     
     def on_sheet_url_change(self, event=None):
         """Handle Google Sheet URL change"""
@@ -1759,7 +1769,6 @@ class BatchProcessorUI(TkinterDnD.Tk):
         duration_label.pack(side="left", padx=(10, 5))
         
         # Add the converted time display
-        self.duration_display_var = tk.StringVar(value="(10m)")
         self.duration_display = ctk.CTkLabel(
             top_row,
             textvariable=self.duration_display_var,
@@ -1774,7 +1783,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
         
         self.duration_input = ctk.CTkEntry(duration_input_frame, width=100)
         self.duration_input.pack(side="top", pady=5)
-        self.duration_input.insert(0, "600")  # Default to 10 minutes
+        self.duration_input.insert(0, "3600")  # Default to 1 hour
         
         # Add input validation and display update
         self.duration_input.bind("<KeyRelease>", self.validate_and_display_duration)
@@ -1795,7 +1804,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
         self.create_duration_button(time_buttons_frame, "+11h", 39600, "#28a745")
         
         # Initialize the display
-        self.update_duration_display(600)
+        self.update_duration_display(3600)
         
         return duration_frame
 
@@ -1953,4 +1962,108 @@ class BatchProcessorUI(TkinterDnD.Tk):
                 "Dashboard Error", 
                 f"Failed to open monitoring dashboard:\n{str(e)}", 
                 parent=self
+            )
+
+    def show_distribution_modal(self):
+        """Show the song pool distribution modal"""
+        if self.rendering:
+            messagebox.showwarning("Processing in Progress", "Cannot configure distribution while processing.")
+            return
+        
+        if not self.sheet_entry.get().strip():
+            messagebox.showwarning("No Sheet URL", "Please configure a Google Sheet URL first.")
+            return
+        
+        modal = SongPoolDistributionModal(self, self.controller)
+        modal.wait_window()
+
+    def logout_user(self):
+        """Handle user logout"""
+        # Ask for confirmation
+        result = messagebox.askyesno(
+            "Confirm Logout", 
+            "Are you sure you want to logout?\n\nYou'll need to sign in again to continue using the application.",
+            parent=self
+        )
+        
+        if result:
+            try:
+                # Import the logout function
+                from auth_module.email_auth import logout
+                
+                # Clear authentication data
+                if logout():
+                    logging.info("User logged out successfully")
+                    
+                    # Show success message
+                    messagebox.showinfo(
+                        "Logged Out", 
+                        "You have been logged out successfully.\nThe application will now close.",
+                        parent=self
+                    )
+                    
+                    # Close the application
+                    self.destroy()
+                    
+                    # Exit the application completely
+                    import sys
+                    sys.exit(0)
+                    
+                else:
+                    messagebox.showerror(
+                        "Logout Failed", 
+                        "Failed to logout. Please try again.",
+                        parent=self
+                    )
+                    
+            except Exception as e:
+                logging.error(f"Error during logout: {e}")
+                messagebox.showerror(
+                    "Logout Error", 
+                    f"An error occurred during logout:\n{str(e)}",
+                    parent=self
+                )
+
+    def _is_current_user_admin(self):
+        """Check if current user is admin - REUSE existing check"""
+        try:
+            # Use controller's existing admin check
+            return self.controller.is_admin_user()
+        except Exception as e:
+            logging.debug(f"Error checking admin status: {e}")
+            return False
+
+    def _configure_upload_access(self):
+        """Configure upload elements based on admin status"""
+        is_admin = self._is_current_user_admin()
+        
+        # Configure auto-upload checkbox
+        if is_admin:
+            self.auto_upload_checkbox.configure(
+                state="normal",
+                text_color="#fff",
+                text="Auto-upload after render"
+            )
+        else:
+            self.auto_upload_checkbox.configure(
+                state="disabled",
+                text_color="#666",
+                text="Auto-upload after render (Admin only)"
+            )
+            self.auto_upload_var.set(False)  # Ensure it's unchecked for non-admins
+        
+        # Configure upload button
+        if is_admin:
+            self.upload_button.configure(
+                state="normal",
+                fg_color="#17a2b8",
+                hover_color="#138496",
+                text="📤 Upload to Drive"
+            )
+        else:
+            self.upload_button.configure(
+                state="disabled",
+                fg_color="#666666",
+                hover_color="#666666",
+                text="📤 Upload to Drive (Admin only)"
             )

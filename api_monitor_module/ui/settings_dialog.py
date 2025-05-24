@@ -6,6 +6,7 @@ Settings Dialog - Configuration interface for the monitoring system
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import messagebox, filedialog
+from utils import center_window
 
 class SettingsDialog(ctk.CTkToplevel):
     """Settings dialog for monitoring configuration"""
@@ -24,27 +25,13 @@ class SettingsDialog(ctk.CTkToplevel):
         self.grab_set()
         
         # Center on parent
-        self.center_on_parent()
+        center_window(self)
         
         # Create UI
         self.create_ui()
         
         # Load current settings
         self.load_current_settings()
-    
-    def center_on_parent(self):
-        """Center dialog on parent window"""
-        self.update_idletasks()
-        
-        parent_x = self.parent.winfo_rootx()
-        parent_y = self.parent.winfo_rooty()
-        parent_width = self.parent.winfo_width()
-        parent_height = self.parent.winfo_height()
-        
-        x = parent_x + (parent_width - 500) // 2
-        y = parent_y + (parent_height - 600) // 2
-        
-        self.geometry(f"+{x}+{y}")
     
     def create_ui(self):
         """Create the settings UI"""

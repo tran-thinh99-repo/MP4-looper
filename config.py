@@ -12,8 +12,6 @@ FFMPEG_DIR = BASE_DIR / "ffmpeg"  # <-- Keep as Path object
 SETTINGS_FILE = "looper_settings.json"
 SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets.readonly']
 SERVICE_ACCOUNT_PATH = get_resource_path("credentials.json")
-FOLDER_ID_MAP_PATH = os.path.join(get_base_path(), "folder_id_map.json")
-UPLOADER_WORKER_PATH = os.path.join(get_base_path(), "uploader_worker.py")
 SETTINGS_FILE = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__), "settings.json")
 
 # Get environment variables with defaults

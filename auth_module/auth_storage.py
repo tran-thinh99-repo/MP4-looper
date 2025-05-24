@@ -11,6 +11,8 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+from paths import get_app_directory
+
 def get_device_fingerprint():
     """Generate a unique fingerprint for this device"""
     try:
@@ -47,16 +49,7 @@ def get_device_info():
     except Exception as e:
         logging.error(f"Error getting device info: {e}")
         return {"error": str(e)}
-
-def get_app_directory():
-    """Get the directory where the application is located"""
-    if getattr(sys, 'frozen', False):
-        # Running as a bundled executable
-        return os.path.dirname(sys.executable)
-    else:
-        # Running as a script
-        return os.path.dirname(os.path.abspath(__file__))
-
+    
 # Constants
 AUTH_FILE = os.path.join(get_app_directory(), "auth_data.enc")
 SALT = b'mp4_looper_salt_value'
@@ -85,9 +78,13 @@ def save_auth_data(email, remember=False, password_hash=None):
             "timestamp": time.time()
         }
         
-        # If remember is True and we have a password hash, save it
+        # FIXED: Only save password hash if remember=True AND password_hash is provided
         if remember and password_hash:
             data["password_hash"] = password_hash
+            logging.debug(f"Saving auth data with password hash (remember=True)")
+        else:
+            logging.debug(f"Saving session-only auth data (remember={remember})")
+            # Don't include password_hash for session-only auth
         
         # Encrypt the data
         key = _get_encryption_key()

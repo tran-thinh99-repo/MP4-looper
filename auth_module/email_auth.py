@@ -14,6 +14,43 @@ from api_monitor_module import get_api_monitor, track_api_call_simple
 # Import config from main app
 from config import SERVICE_ACCOUNT_PATH, SCOPES, AUTH_SHEET_ID, AUTH_SHEET_NAME, MAX_AUTH_AGE
 
+# Global dictionary to track authentication attempts per user
+_auth_attempts = {}
+_last_cleanup = time.time()
+
+def _check_auth_rate_limit(email):
+    """Check if this email is making too many auth attempts"""
+    global _auth_attempts, _last_cleanup
+    
+    current_time = time.time()
+    
+    # Clean up old attempts every 10 minutes
+    if current_time - _last_cleanup > 600:  # 10 minutes
+        cutoff_time = current_time - 3600  # Keep last hour
+        _auth_attempts = {
+            email: attempts for email, attempts in _auth_attempts.items()
+            if any(t > cutoff_time for t in attempts)
+        }
+        _last_cleanup = current_time
+    
+    # Get attempts for this email
+    if email not in _auth_attempts:
+        _auth_attempts[email] = []
+    
+    # Remove attempts older than 1 hour
+    hour_ago = current_time - 3600
+    _auth_attempts[email] = [t for t in _auth_attempts[email] if t > hour_ago]
+    
+    # Check if too many attempts
+    if len(_auth_attempts[email]) >= 5:  # Max 5 attempts per hour per email
+        oldest_attempt = min(_auth_attempts[email])
+        wait_time = 3600 - (current_time - oldest_attempt)  # Time until oldest expires
+        return False, f"Too many login attempts. Try again in {int(wait_time/60)} minutes."
+    
+    # Record this attempt
+    _auth_attempts[email].append(current_time)
+    return True, "OK"
+
 def _hash_password(password):
     """Create a simple hash of the password"""
     salt = "mp4_looper_salt"  # In production, use a better salt strategy
@@ -181,12 +218,18 @@ def _validate_credentials_with_sheet(email, password_hash):
         return False, "Could not access authentication database"
 
 def authenticate_user(email, password, remember=False):
-    """Authenticate a user with email and password"""
+    """Authenticate a user with email and password - MODIFIED"""
     try:
+        # ADD: Check rate limiting before doing anything
+        rate_ok, rate_message = _check_auth_rate_limit(email)
+        if not rate_ok:
+            track_api_call_simple("auth_login", success=False, error_message=rate_message)
+            return False, rate_message
+        
         # Your existing authentication logic here
         success, message = _authenticate_user_impl(email, password, remember)
         
-        # Simple tracking - just one line!
+        # Track the API call
         track_api_call_simple("auth_login", success=success, 
                             error_message=message if not success else None)
         
@@ -198,7 +241,7 @@ def authenticate_user(email, password, remember=False):
 
 def _authenticate_user_impl(email, password, remember=False):
     """Original authentication implementation"""
-    logging.debug(f"Authentication attempt - Email: '{email}'")
+    logging.debug(f"Authentication attempt - Email: '{email}', Remember: {remember}")
     
     if not email or not password:
         return False, "Email and password are required"
@@ -213,13 +256,19 @@ def _authenticate_user_impl(email, password, remember=False):
         # Get device info
         device_info = get_device_info()
         
-        # Save authentication state if successful
-        save_auth_data(email, remember, password_hash if remember else None)
+        # FIXED: Only save auth data with password hash if remember=True
+        if remember:
+            # Save with password hash for future auto-login
+            save_auth_data(email, remember=True, password_hash=password_hash)
+            logging.info(f"User authenticated and remembered: {email}")
+        else:
+            # Save session-only auth data (no password hash)
+            save_auth_data(email, remember=False, password_hash=None)
+            logging.info(f"User authenticated for session only: {email}")
         
         # Log device info to Google Sheets
         log_device_info_to_sheet(email, device_info, "manual")
         
-        logging.info(f"User authenticated: {email}")
         return True, "Authentication successful"
     else:
         return False, message
@@ -462,16 +511,22 @@ def check_remembered_user():
 
 def _check_remembered_user_impl():
     """Original remembered user check implementation"""
-    # Your existing check_remembered_user code here
     auth_data = load_auth_data()
     
-    if not auth_data or not auth_data.get('remember', False):
+    if not auth_data:
+        logging.debug("No auth data found")
+        return False, None
+    
+    # FIXED: Only auto-login if remember was explicitly set to True AND we have a password hash
+    if not auth_data.get('remember', False):
+        logging.debug("Remember me was not enabled - requiring manual login")
         return False, None
         
     email = auth_data.get('email')
     stored_hash = auth_data.get('password_hash')
     
     if not email or not stored_hash:
+        logging.debug("Missing email or password hash - requiring manual login")
         return False, None
         
     # Check if auth data is too old
@@ -501,6 +556,7 @@ def _check_remembered_user_impl():
 
 def logout():
     """Log the user out by clearing auth data"""
+    logging.info("User logging out - clearing all auth data")
     return clear_auth_data()
 
 def get_current_user():

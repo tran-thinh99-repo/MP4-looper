@@ -59,3 +59,4 @@ git_init.bat
 .env
 
 *.enc
+looper_settings.json.backup
