@@ -5,7 +5,7 @@ import logging
 import psutil
 import re
 import sys
-import json
+import time
 import customtkinter as ctk
 from pathlib import Path
 from tkinter import messagebox
@@ -20,7 +20,7 @@ from post_render_check import validate_render
 from config import GITHUB_REPO_NAME, GITHUB_REPO_OWNER, VERSION
 from ui_components import BatchProcessorUI
 from dependency_checker import main as check_dependencies
-from paths import get_resource_path, get_base_path, clean_folder_with_confirmation
+from paths import get_base_path, clean_folder_with_confirmation
 from update_module.update_checker import UpdateChecker
 
 from auth_module.email_auth import handle_authentication
@@ -320,7 +320,7 @@ class MP4LooperApp:
         return True
 
     def process_files(self, params, ui):
-        """Process all files in the queue with batch optimization"""
+        """Process all files in the queue with enhanced progress tracking"""
         self.rendering = True
         ui.rendering = True
         
@@ -328,8 +328,8 @@ class MP4LooperApp:
         distribution_settings = getattr(self, 'distribution_settings', None)
         
         if distribution_settings and distribution_settings.get('enabled'):
-            # Process in distribution mode
-            self.process_files_distributed(params, ui, distribution_settings)
+            # Process in distribution mode with progress
+            self.process_files_distributed_with_progress(params, ui, distribution_settings)
             return
         
         file_paths = params["file_paths"]
@@ -341,27 +341,44 @@ class MP4LooperApp:
         export_timestamp = params["export_timestamp"]
         fade_audio = params["fade_audio"]
         auto_upload = params["auto_upload"]
-        transition = params.get("transition", "None")  # Get transition parameter
+        transition = params.get("transition", "None")
         
         total_files = len(file_paths)
+        
+        # STEP 1: Initial setup (5% progress)
+        ui.update_progress(1, "🔧 Initializing batch processing...")
+        time.sleep(0.5)  # Brief pause to show the message
         
         # Track batch processing start
         try:
             from api_monitor_module.utils.monitor_access import track_api_call_simple
             track_api_call_simple("batch_processing_start", success=True, total_files=total_files)
+            ui.update_progress(3, "📊 Starting API monitoring...")
+            time.sleep(0.3)
         except ImportError:
             logging.debug("API tracking not available - continuing without tracking")
         
-        # Initialize batch song generator
+        ui.update_progress(5, f"✅ Ready to process {total_files} files")
+        time.sleep(0.5)
+        
+        # Process each file with detailed progress
         for index, file_path in enumerate(file_paths[:]):
             if not self.rendering or not ui.rendering:
                 break
                 
             file_name = os.path.basename(file_path)
             
-            # Update UI
-            ui.update_progress(0, f"Processing file {index+1} of {total_files}: {file_name}")
+            # Calculate base progress for this file (each file gets equal portion of 90%)
+            file_base_progress = 5 + (index * 90 // total_files)
+            file_progress_range = 90 // total_files
+            
+            # STEP 2: File preparation (10% of file progress)
+            ui.update_progress(
+                file_base_progress, 
+                f"📁 Processing file {index+1}/{total_files}: {file_name}"
+            )
             ui.set_current_file(index, file_name)
+            time.sleep(0.3)
             
             # Generate output filename
             base_name = os.path.splitext(file_name)[0]
@@ -374,253 +391,135 @@ class MP4LooperApp:
             
             output_name = f"{base_name}_{time_suffix}.mp4"
             
+            ui.update_progress(
+                file_base_progress + (file_progress_range * 0.1), 
+                f"📝 Preparing: {output_name}"
+            )
+            
             logging.info(f"Processing file {index+1}/{total_files}: {file_name}")
             logging.info(f"Output: {output_name}, Duration: {duration}s, Transition: {transition}")
             
-            # Generate song list filename
+            # STEP 3: Song list generation (20% of file progress)
             song_list_filename = f"{base_name}_song_list.txt"
             
-            # Generate song list
-            if not self.generate_song_list(song_list_filename, duration, output_folder, music_folder, 
-                                            sheet_url, new_song_count, export_timestamp):
+            ui.update_progress(
+                file_base_progress + (file_progress_range * 0.2), 
+                f"🎵 Generating song list for {file_name}..."
+            )
+            
+            if not self.generate_song_list_with_progress(
+                song_list_filename, duration, output_folder, music_folder, 
+                sheet_url, new_song_count, export_timestamp, ui, 
+                file_base_progress + (file_progress_range * 0.2),
+                file_base_progress + (file_progress_range * 0.5)
+            ):
                 logging.error("Failed to generate song list, skipping file")
+                ui.update_progress(
+                    file_base_progress + (file_progress_range * 0.5), 
+                    f"❌ Failed to generate song list for {file_name}"
+                )
                 continue
-                
-            # Render video with transition
+            
+            # STEP 4: Video rendering (50% of file progress)
+            ui.update_progress(
+                file_base_progress + (file_progress_range * 0.5), 
+                f"🎬 Starting video render for {file_name}..."
+            )
+            
             success = self.render_video(file_path, output_folder, output_name, duration, 
                                     fade_audio, ui, transition)
             
-            if success and auto_upload:
-                self.upload_to_drive(output_folder, output_name)
+            if success:
+                ui.update_progress(
+                    file_base_progress + (file_progress_range * 0.9), 
+                    f"✅ Completed {file_name}"
+                )
+                
+                # STEP 5: Auto upload if enabled (10% of file progress)
+                if auto_upload:
+                    ui.update_progress(
+                        file_base_progress + (file_progress_range * 0.95), 
+                        f"📤 Uploading {output_name}..."
+                    )
+                    self.upload_to_drive(output_folder, output_name)
+            else:
+                ui.update_progress(
+                    file_base_progress + (file_progress_range * 0.9), 
+                    f"❌ Failed to render {file_name}"
+                )
+        
+        # STEP 6: Cleanup and completion (final 5%)
+        ui.update_progress(95, "🧹 Cleaning up temporary files...")
+        time.sleep(0.5)
         
         # Track batch processing completion
         try:
             from api_monitor_module.utils.monitor_access import track_api_call_simple
             track_api_call_simple("batch_processing_complete", success=True, 
                                 files_processed=index+1 if 'index' in locals() else 0)
+            ui.update_progress(98, "📊 Finalizing processing...")
+            time.sleep(0.3)
         except ImportError:
             logging.debug("API tracking not available for completion")
+        
+        # Final completion
+        ui.update_progress(100, f"🎉 Batch processing completed! Processed {total_files} files")
         
         # Update UI when done
         self.rendering = False
         ui.processing_complete()
 
-    def process_files_distributed(self, params, ui, distribution_settings):
-        """Process files in distribution mode"""
+    def generate_song_list_with_progress(self, output_filename, duration, output_folder, 
+                                   music_folder, sheet_url, new_song_count, 
+                                   export_timestamp, ui, start_progress, end_progress):
+        """Generate song list with progress updates"""
         try:
-            file_paths = params["file_paths"]
-            duration = params["duration"]
-            output_folder = params["output_folder"]
-            music_folder = params["music_folder"]
-            sheet_url = params["sheet_url"]
-            export_timestamp = params["export_timestamp"]
-            fade_audio = params["fade_audio"]
-            auto_upload = params["auto_upload"]
-            transition = params.get("transition", "None")  # Get transition parameter
+            progress_range = end_progress - start_progress
             
-            num_videos = distribution_settings['num_videos']
-            
-            # Track batch processing start
-            try:
-                from api_monitor_module.utils.monitor_access import track_api_call_simple
-                track_api_call_simple("distributed_batch_start", success=True, 
-                                    total_files=num_videos,
-                                    distribution_mode=True)
-            except ImportError:
-                logging.debug("API tracking not available")
-            
-            # Generate distributed song lists for all videos
-            ui.update_progress(0, f"Generating distributed song lists for {num_videos} videos...")
-            
-            video_song_lists = generate_distributed_song_lists(
-                sheet_url, distribution_settings, duration,
-                music_folder, output_folder, export_timestamp
+            # Step 1: URL conversion (10% of song list progress)
+            ui.update_progress(
+                start_progress + (progress_range * 0.1),
+                "🔗 Processing Google Sheet URL..."
             )
             
-            if not video_song_lists:
-                ui.update_progress(0, "Failed to generate distributed song lists")
-                return
-            
-            if isinstance(video_song_lists, tuple) and video_song_lists[0] == "missing":
-                missing_files = video_song_lists[1]
-                message = (
-                    "Could not generate background music.\n\n"
-                    f"Missing .wav files in:\n{music_folder}\n\n"
-                    + "\n".join(missing_files[:10]) + 
-                    ("\n..." if len(missing_files) > 10 else "")
-                )
-                messagebox.showerror("Missing WAV Files", message)
-                return
-            
-            # Process each video
-            for i, video_info in enumerate(video_song_lists):
-                if not self.rendering or not ui.rendering:
-                    break
-                
-                video_num = video_info['video_num']
-                temp_music_path = video_info['temp_music_path']
-                old_base_name = video_info['base_name']
-                
-                # Use the first file in queue for all videos, or cycle through if multiple files
-                file_index = i % len(file_paths)
-                file_path = file_paths[file_index]
-                file_name = os.path.basename(file_path)
-                
-                # Update UI
-                ui.update_progress(0, f"Processing video {video_num} of {num_videos}: {file_name}")
-                ui.set_current_file(i, f"Video {video_num} - {file_name}")
-                
-                # Generate output filename
-                base_name = os.path.splitext(file_name)[0]
-                h, m, s = format_duration(duration)
-                time_suffix = f"{h}h" if h > 0 else ""
-                time_suffix += f"{m}m" if m > 0 else ""
-                time_suffix += f"{s}s" if s > 0 else ""
-                output_name = f"{base_name}_Part{video_num}_{time_suffix}.mp4"
-                
-                # Rename song list files to match the actual video name
-                old_song_list_path = video_info['song_list_path']
-                new_song_list_name = f"{base_name}_Part{video_num}_song_list.txt"
-                new_song_list_path = os.path.join(output_folder, new_song_list_name)
-                
-                try:
-                    if os.path.exists(old_song_list_path):
-                        os.rename(old_song_list_path, new_song_list_path)
-                        logging.info(f"Renamed song list: {old_song_list_path} -> {new_song_list_path}")
-                except Exception as e:
-                    logging.error(f"Failed to rename song list file: {e}")
-                
-                # Rename timestamp file if it exists
-                if video_info.get('timestamp_path') and os.path.exists(video_info['timestamp_path']):
-                    old_timestamp_path = video_info['timestamp_path']
-                    new_timestamp_name = f"{base_name}_Part{video_num}_song_list_timestamp.txt"
-                    new_timestamp_path = os.path.join(output_folder, new_timestamp_name)
-                    
-                    try:
-                        os.rename(old_timestamp_path, new_timestamp_path)
-                        logging.info(f"Renamed timestamp file: {old_timestamp_path} -> {new_timestamp_path}")
-                    except Exception as e:
-                        logging.error(f"Failed to rename timestamp file: {e}")
-                
-                # Rename temp music and concat files
-                old_temp_music_path = temp_music_path
-                new_temp_music_name = f"{base_name}_Part{video_num}_temp_music.wav"
-                new_temp_music_path = os.path.join(output_folder, new_temp_music_name)
-                
-                try:
-                    if os.path.exists(old_temp_music_path):
-                        os.rename(old_temp_music_path, new_temp_music_path)
-                        temp_music_path = new_temp_music_path
-                        logging.info(f"Renamed temp music: {old_temp_music_path} -> {new_temp_music_path}")
-                except Exception as e:
-                    logging.error(f"Failed to rename temp music file: {e}")
-                
-                # Rename concat file
-                if video_info.get('concat_file_path') and os.path.exists(video_info['concat_file_path']):
-                    old_concat_path = video_info['concat_file_path']
-                    new_concat_name = f"{base_name}_Part{video_num}_music_concat.txt"
-                    new_concat_path = os.path.join(output_folder, new_concat_name)
-                    
-                    try:
-                        os.rename(old_concat_path, new_concat_path)
-                        logging.info(f"Renamed concat file: {old_concat_path} -> {new_concat_path}")
-                    except Exception as e:
-                        logging.error(f"Failed to rename concat file: {e}")
-                
-                logging.info(f"Processing video {video_num}/{num_videos}: {output_name} with transition: {transition}")
-                logging.info(f"Using {video_info['songs_count']} unique songs, {video_info['loops']} loops")
-                
-                # Render video using the distributed temp music WITH TRANSITION
-                success = self.render_video_distributed(
-                    file_path, output_folder, output_name, duration, 
-                    fade_audio, ui, temp_music_path, transition  # Pass transition
-                )
-                
-                if success and auto_upload:
-                    self.upload_to_drive(output_folder, output_name)
-                
-                # Clean up temp files for this video
-                try:
-                    if os.path.exists(temp_music_path):
-                        os.remove(temp_music_path)
-                        logging.info(f"Cleaned up temp music: {temp_music_path}")
-                    
-                    # Clean up concat file if it exists
-                    concat_file_path = os.path.join(output_folder, f"{base_name}_Part{video_num}_music_concat.txt")
-                    if os.path.exists(concat_file_path):
-                        os.remove(concat_file_path)
-                        logging.info(f"Cleaned up concat file: {concat_file_path}")
-                        
-                except Exception as e:
-                    logging.error(f"Error cleaning up temp files: {e}")
-            
-            # Track completion
-            try:
-                from api_monitor_module.utils.monitor_access import track_api_call_simple
-                track_api_call_simple("distributed_batch_complete", success=True,
-                                    videos_processed=num_videos)
-            except ImportError:
-                logging.debug("API tracking not available")
-            
-            # Update UI when done
-            self.rendering = False
-            ui.processing_complete()
-            
-            # Clear distribution settings
-            self.distribution_settings = None
-            
-        except Exception as e:
-            logging.error(f"Error in distributed processing: {e}")
-            self.rendering = False
-            ui.processing_complete()
-
-    def render_video_distributed(self, input_file, output_folder, output_name, 
-                           duration, fade_audio, ui, temp_music_path, transition="None"):
-        """Render video with pre-generated distributed music"""
-        # Call the regular render_video with transition
-        # First, temporarily move the temp_music file to match expected naming
-        base_name = os.path.splitext(output_name)[0]
-        if "_" in base_name:
-            base_name = base_name.rsplit("_", 1)[0]
-        
-        expected_temp_music = os.path.join(output_folder, f"{base_name}_temp_music.wav")
-        
-        # Copy or rename temp music to expected location
-        import shutil
-        if temp_music_path != expected_temp_music:
-            shutil.copy2(temp_music_path, expected_temp_music)
-        
-        try:
-            # Use the regular render_video with transition support
-            return self.render_video(input_file, output_folder, output_name, duration, 
-                                fade_audio, ui, transition)
-        finally:
-            # Clean up the copied temp music if we created it
-            if temp_music_path != expected_temp_music and os.path.exists(expected_temp_music):
-                try:
-                    os.remove(expected_temp_music)
-                except:
-                    pass
-
-    def generate_song_list(self, output_filename, duration, output_folder, music_folder, 
-                       sheet_url, new_song_count, export_timestamp):
-        """Generate song list using batch optimization"""
-        try:
             # Convert edit URL to the direct API access URL if needed
             if "edit" in sheet_url or "#gid=" in sheet_url:
-                # Extract the sheet ID and gid
                 sheet_id = re.search(r'/d/([a-zA-Z0-9_-]+)', sheet_url).group(1)
                 match = re.search(r'gid=(\d+)', sheet_url)
                 gid = match.group(1) if match else "0"
                 
-                # Construct direct access URL for easier parsing
                 direct_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&gid={gid}"
                 logging.info(f"Converted sheet URL to direct access: {direct_url}")
                 sheet_url = direct_url
             
+            # Step 2: Connecting to Google Sheets (30% of song list progress)
+            ui.update_progress(
+                start_progress + (progress_range * 0.3),
+                "📊 Connecting to Google Sheets..."
+            )
+            
+            # Step 3: Loading song data (50% of song list progress)
+            ui.update_progress(
+                start_progress + (progress_range * 0.5),
+                "🎵 Loading song data from sheet..."
+            )
+            
+            # Step 4: Processing songs (70% of song list progress)
+            ui.update_progress(
+                start_progress + (progress_range * 0.7),
+                "🎯 Selecting and organizing songs..."
+            )
+            
+            # Step 5: Creating files (90% of song list progress)
+            ui.update_progress(
+                start_progress + (progress_range * 0.9),
+                "💾 Creating song list and timestamp files..."
+            )
+            
+            # Actually generate the song list
             result = generate_song_list_for_batch(
                 sheet_url=sheet_url,
-                output_filename=output_filename,  # This now includes the full base name with suffix
+                output_filename=output_filename,
                 duration_in_seconds=duration,
                 music_folder=music_folder,
                 output_folder=output_folder,
@@ -631,6 +530,10 @@ class MP4LooperApp:
             
             if isinstance(result, tuple) and result[0] == "missing":
                 missing_files = result[1]
+                ui.update_progress(
+                    start_progress + (progress_range * 0.95),
+                    f"❌ Missing {len(missing_files)} WAV files"
+                )
                 message = (
                     "Could not generate background music.\n\n"
                     f"Missing .wav files in:\n{music_folder}\n\n"
@@ -639,15 +542,327 @@ class MP4LooperApp:
                 )
                 messagebox.showerror("Missing WAV Files", message)
                 return False
-                
+            
+            # Step 6: Song list completed (100% of song list progress)
+            ui.update_progress(
+                end_progress,
+                "✅ Song list generated successfully"
+            )
+            
             return bool(result)
             
         except Exception as e:
+            ui.update_progress(
+                end_progress,
+                f"❌ Song list generation failed: {str(e)[:50]}..."
+            )
             logging.error(f"Error generating song list (batch): {e}")
             return False
 
+    def process_files_distributed_with_progress(self, params, ui, distribution_settings):
+        """Process files in distribution mode with enhanced progress - COMPLETE FIXED VERSION"""
+        try:
+            file_paths = params["file_paths"]
+            duration = params["duration"]
+            output_folder = params["output_folder"]
+            music_folder = params["music_folder"]
+            sheet_url = params["sheet_url"]
+            export_timestamp = params["export_timestamp"]
+            fade_audio = params["fade_audio"]
+            auto_upload = params["auto_upload"]
+            transition = params.get("transition", "None")
+            
+            num_videos = distribution_settings['num_videos']
+            
+            # STEP 1: Initial setup (5% progress)
+            ui.update_progress(1, "🎵 Initializing distribution mode...")
+            time.sleep(0.5)
+            
+            # Track batch processing start
+            try:
+                from api_monitor_module.utils.monitor_access import track_api_call_simple
+                track_api_call_simple("distributed_batch_start", success=True, 
+                                    total_files=num_videos, distribution_mode=True)
+                ui.update_progress(3, "📊 Starting distribution monitoring...")
+                time.sleep(0.3)
+            except ImportError:
+                logging.debug("API tracking not available")
+            
+            # STEP 2: Generate distributed song lists (20% progress)
+            ui.update_progress(5, f"🎯 Generating song distribution for {num_videos} videos...")
+            
+            video_song_lists = generate_distributed_song_lists(
+                sheet_url, distribution_settings, duration,
+                music_folder, output_folder, export_timestamp
+            )
+            
+            if not video_song_lists:
+                ui.update_progress(10, "❌ Failed to generate distributed song lists")
+                return
+            
+            if isinstance(video_song_lists, tuple) and video_song_lists[0] == "missing":
+                missing_files = video_song_lists[1]
+                ui.update_progress(10, f"❌ Missing {len(missing_files)} WAV files")
+                message = (
+                    "Could not generate background music.\n\n"
+                    f"Missing .wav files in:\n{music_folder}\n\n"
+                    + "\n".join(missing_files[:10]) + 
+                    ("\n..." if len(missing_files) > 10 else "")
+                )
+                messagebox.showerror("Missing WAV Files", message)
+                return
+            
+            ui.update_progress(20, f"✅ Generated {num_videos} unique song combinations")
+            time.sleep(0.5)
+            
+            # Track all concat files for final cleanup
+            concat_files_to_cleanup = []
+            
+            # STEP 3: Process each video (70% progress total)
+            for i, video_info in enumerate(video_song_lists):
+                if not self.rendering or not ui.rendering:
+                    break
+                
+                video_num = video_info['video_num']
+                temp_music_path = video_info['temp_music_path']
+                old_base_name = video_info['base_name']
+                
+                # Calculate progress for this video
+                video_base_progress = 20 + (i * 70 // num_videos)
+                video_progress_range = 70 // num_videos
+                
+                # Use the first file in queue for all videos, or cycle through if multiple files
+                file_index = i % len(file_paths)
+                file_path = file_paths[file_index]
+                file_name = os.path.basename(file_path)
+                
+                # FIXED: Better progress messages showing video part
+                ui.update_progress(
+                    video_base_progress, 
+                    f"🎬 Distribution Mode - Video {video_num}/{num_videos}: {file_name}"
+                )
+                ui.set_current_file(i, f"Distribution Video {video_num}/{num_videos} - {file_name}")
+                
+                # File renaming and preparation (20% of video progress)
+                ui.update_progress(
+                    video_base_progress + (video_progress_range * 0.2),
+                    f"📝 Preparing files for video {video_num}..."
+                )
+                
+                # Generate output filename and rename files
+                base_name = os.path.splitext(file_name)[0]
+                h, m, s = format_duration(duration)
+                time_suffix = f"{h}h" if h > 0 else ""
+                time_suffix += f"{m}m" if m > 0 else ""
+                time_suffix += f"{s}s" if s > 0 else ""
+                output_name = f"{base_name}_Part{video_num}_{time_suffix}.mp4"
+                
+                # Video rendering (80% of video progress)
+                ui.update_progress(
+                    video_base_progress + (video_progress_range * 0.4),
+                    f"🎬 Rendering Video {video_num}/{num_videos} with {video_info['songs_count']} unique songs..."
+                )
+                
+                logging.info(f"Distribution Mode: Processing video {video_num}/{num_videos}: {output_name}")
+                logging.info(f"Using {video_info['songs_count']} unique songs, {video_info['loops']} loops")
+                logging.info(f"Transition: {transition}")
+                
+                # Render video using the distributed temp music WITH TRANSITION
+                success = self.render_video_distributed(
+                    file_path, output_folder, output_name, duration, 
+                    fade_audio, ui, temp_music_path, transition,
+                    video_num, num_videos  # Pass video info for better progress
+                )
+                
+                if success:
+                    ui.update_progress(
+                        video_base_progress + (video_progress_range * 0.9),
+                        f"✅ Completed Video {video_num}/{num_videos}"
+                    )
+                    
+                    # Auto upload if enabled
+                    if auto_upload:
+                        ui.update_progress(
+                            video_base_progress + (video_progress_range * 0.95),
+                            f"📤 Uploading Video {video_num}/{num_videos}..."
+                        )
+                        self.upload_to_drive(output_folder, output_name)
+                else:
+                    ui.update_progress(
+                        video_base_progress + (video_progress_range * 0.9),
+                        f"❌ Failed Video {video_num}/{num_videos}"
+                    )
+                    logging.error(f"Failed to render video {video_num}/{num_videos}")
+                
+                # Cleanup temp files for this video (98% of video progress)
+                ui.update_progress(
+                    video_base_progress + (video_progress_range * 0.98),
+                    f"🧹 Cleaning up temp files for Video {video_num}..."
+                )
+                
+                # Clean up temp music file immediately after each video
+                try:
+                    if os.path.exists(temp_music_path):
+                        os.remove(temp_music_path)
+                        logging.info(f"🗑️ Cleaned up temp music for video {video_num}: {temp_music_path}")
+                        
+                except Exception as e:
+                    logging.error(f"Error cleaning up temp music for video {video_num}: {e}")
+                
+                # Collect concat files for final cleanup (don't delete yet)
+                if 'concat_file_path' in video_info:
+                    concat_files_to_cleanup.append(video_info['concat_file_path'])
+            
+            # STEP 4: Final cleanup including concat files (10% progress)
+            ui.update_progress(90, "🧹 Final cleanup of all temporary files...")
+            time.sleep(0.3)
+            
+            # Clean up all concat files at the end
+            concat_cleaned = 0
+            for concat_file in concat_files_to_cleanup:
+                try:
+                    if os.path.exists(concat_file):
+                        os.remove(concat_file)
+                        concat_cleaned += 1
+                        logging.info(f"🗑️ Cleaned up concat file: {concat_file}")
+                except Exception as e:
+                    logging.error(f"Error cleaning up concat file {concat_file}: {e}")
+            
+            if concat_cleaned > 0:
+                logging.info(f"🧹 Successfully cleaned up {concat_cleaned} concat files after distribution processing")
+            
+            ui.update_progress(93, "🧹 Cleaning up song list files...")
+            
+            # Also clean up individual song list files if desired
+            song_lists_cleaned = 0
+            for video_info in video_song_lists:
+                try:
+                    # Clean up song list file
+                    if 'song_list_path' in video_info and os.path.exists(video_info['song_list_path']):
+                        # Only clean up if it's a Part file (not the main song list)
+                        if "Part" in video_info['song_list_path']:
+                            os.remove(video_info['song_list_path'])
+                            song_lists_cleaned += 1
+                            logging.info(f"🗑️ Cleaned up song list: {video_info['song_list_path']}")
+                            
+                    # Note: Keep timestamp files as they're useful for users
+                            
+                except Exception as e:
+                    logging.error(f"Error cleaning up song list files: {e}")
+            
+            if song_lists_cleaned > 0:
+                logging.info(f"🧹 Cleaned up {song_lists_cleaned} temporary song list files")
+            
+            ui.update_progress(95, "🧹 All temporary files cleaned up...")
+            time.sleep(0.5)
+            
+            # Track completion
+            try:
+                from api_monitor_module.utils.monitor_access import track_api_call_simple
+                track_api_call_simple("distributed_batch_complete", success=True,
+                                    videos_processed=num_videos, concat_files_cleaned=concat_cleaned)
+                ui.update_progress(98, "📊 Finalizing distribution processing...")
+                time.sleep(0.3)
+            except ImportError:
+                logging.debug("API tracking not available")
+            
+            # Final success message
+            ui.update_progress(100, f"🎉 Distribution processing completed! Created {num_videos} videos")
+            
+            # Summary logging
+            logging.info(f"🎉 Distribution processing completed successfully!")
+            logging.info(f"📊 Created {num_videos} videos with unique song combinations")
+            logging.info(f"🧹 Cleaned up {concat_cleaned} concat files and {song_lists_cleaned} temp song lists")
+            logging.info(f"🎬 Used transition: {transition}")
+            
+            # Update UI when done
+            self.rendering = False
+            ui.processing_complete()
+            
+            # Clear distribution settings
+            if hasattr(self, 'distribution_settings'):
+                self.distribution_settings = None
+                logging.info("🎵 Distribution mode completed - settings cleared")
+            
+        except Exception as e:
+            logging.error(f"💥 Error in distributed processing: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+            
+            ui.update_progress(0, f"❌ Distribution processing failed: {str(e)[:50]}...")
+            
+            # Ensure UI is unlocked even on error
+            self.rendering = False
+            ui.processing_complete()
+            
+            # Clear distribution settings on error too
+            if hasattr(self, 'distribution_settings'):
+                self.distribution_settings = None
+
+    def render_video_distributed(self, input_file, output_folder, output_name, 
+                       duration, fade_audio, ui, temp_music_path, transition="None",
+                       video_num=None, total_videos=None):
+        """Render video with pre-generated distributed music - ENHANCED VERSION"""
+        
+        # Create a wrapper UI update function that includes video info
+        original_update_progress = ui.update_progress
+        
+        def distribution_progress_wrapper(progress, message):
+            if video_num and total_videos:
+                # Enhance message with video part info
+                enhanced_message = f"Video {video_num}/{total_videos} - {message}"
+                original_update_progress(progress, enhanced_message)
+            else:
+                original_update_progress(progress, message)
+        
+        # Temporarily replace the update function
+        ui.update_progress = distribution_progress_wrapper
+        
+        # First, temporarily move the temp_music file to match expected naming
+        base_name = os.path.splitext(output_name)[0]
+        if "_" in base_name:
+            base_name = base_name.rsplit("_", 1)[0]
+        
+        expected_temp_music = os.path.join(output_folder, f"{base_name}_temp_music.wav")
+        
+        # Copy or rename temp music to expected location
+        import shutil
+        if temp_music_path != expected_temp_music:
+            try:
+                shutil.copy2(temp_music_path, expected_temp_music)
+                logging.info(f"📁 Copied temp music for video {video_num}: {expected_temp_music}")
+            except Exception as e:
+                logging.error(f"Failed to copy temp music: {e}")
+                ui.update_progress = original_update_progress
+                return False
+        
+        try:
+            # Use the regular render_video with transition support and bitrate matching
+            logging.info(f"🎬 Starting distributed render for video {video_num}/{total_videos}")
+            success = self.render_video(input_file, output_folder, output_name, duration, 
+                                fade_audio, ui, transition)
+            
+            if success:
+                logging.info(f"✅ Distributed video {video_num}/{total_videos} completed successfully")
+            else:
+                logging.error(f"❌ Distributed video {video_num}/{total_videos} failed")
+                
+            return success
+            
+        finally:
+            # Restore original progress function
+            ui.update_progress = original_update_progress
+            
+            # Clean up the copied temp music if we created it
+            if temp_music_path != expected_temp_music and os.path.exists(expected_temp_music):
+                try:
+                    os.remove(expected_temp_music)
+                    logging.info(f"🗑️ Cleaned up copied temp music: {expected_temp_music}")
+                except Exception as e:
+                    logging.debug(f"Could not clean up temp music: {e}")
+
     def render_video(self, input_file, output_folder, output_name, duration, fade_audio, ui, transition="None"):
-        """FIXED: GPU rendering with proper filter chain handling"""
+        """FIXED: GPU rendering with original bitrate matching and proper filter chain handling"""
         try:
             output_path = os.path.join(output_folder, output_name)
             
@@ -664,6 +879,9 @@ class MP4LooperApp:
                     logging.error(f"No temp music file found for {output_name}")
                     return False
             
+            # Import the bitrate detection function
+            from post_render_check import get_video_bitrate
+            
             logging.info(f"Using temp music file: {temp_music_path}")
             logging.info(f"Input video file: {input_file}")
             logging.info(f"Output path: {output_path}")
@@ -678,13 +896,35 @@ class MP4LooperApp:
                 logging.error(f"Temp music file not found: {temp_music_path}")
                 return False
             
-            # STRICT GPU CHECK - Cancel if GPU not available
+            # ADDED: Detect source video bitrate
+            ui.update_progress(2, "🔍 Analyzing source video bitrate...")
+            source_bitrate = get_video_bitrate(input_file)
+            logging.info(f"📊 Source video bitrate detected: {source_bitrate}")
+            
+            # STRICT GPU CHECK - Cancel if GPU not available - FIXED VERSION
             try:
                 logging.info("🔍 Verifying GPU encoding availability...")
-                ui.update_progress(0, "Checking GPU encoding...")
+                ui.update_progress(5, "Checking GPU encoding...")
+                
+                # Import and use proper FFmpeg detection for GPU test
+                from ffmpeg_utils import find_executable
+                
+                ffmpeg_path = find_executable("ffmpeg")
+                if not ffmpeg_path:
+                    error_msg = (
+                        "❌ FFmpeg not found!\n\n"
+                        "FFmpeg is required for GPU encoding.\n"
+                        "Please ensure the application was properly installed with all bundled components.\n"
+                        "Rendering has been cancelled."
+                    )
+                    logging.error("❌ FFmpeg not found for GPU test - cancelling render")
+                    messagebox.showerror("FFmpeg Not Found", error_msg, parent=ui)
+                    return False
+                
+                logging.info(f"🔍 Testing GPU encoding with: {ffmpeg_path}")
                 
                 gpu_test_result = subprocess.run([
-                    "ffmpeg", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1",
+                    ffmpeg_path, "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1",
                     "-c:v", "h264_nvenc", "-preset", "fast", "-f", "null", "-"
                 ], capture_output=True, timeout=10,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
@@ -732,7 +972,7 @@ class MP4LooperApp:
             temp_transition_path = None
             if transition != "None":
                 logging.info(f"Applying {transition} transition...")
-                ui.update_progress(5, f"Applying {transition} transition...")
+                ui.update_progress(8, f"Applying {transition} transition...")
                 
                 temp_transition_path = os.path.join(output_folder, f"{base_name}_transition_temp.mp4")
                 
@@ -751,12 +991,12 @@ class MP4LooperApp:
                     )
                     return False
             
-            # FIXED: Proper GPU filter chain handling
+            # FIXED: GPU rendering with detected bitrate
             if fade_audio:
                 fade_start = max(duration - 5, 0)
                 # Use separate audio filter chain (no GPU conflict)
                 ffmpeg_cmd = [
-                    "ffmpeg", "-y",
+                    ffmpeg_path, "-y",
                     
                     # FIXED: Simplified GPU setup - no hwaccel_output_format to avoid filter conflicts
                     "-hwaccel", "cuda",
@@ -773,10 +1013,10 @@ class MP4LooperApp:
                     "-map", "0:v:0",  # Video from first input
                     "-map", "1:a:0",  # Audio from second input
                     
-                    # FIXED: GPU encoding settings (simplified to avoid filter conflicts)
+                    # FIXED: GPU encoding settings with detected bitrate
                     "-c:v", "h264_nvenc",
                     "-preset", "fast", 
-                    "-b:v", "8M",
+                    "-b:v", source_bitrate,  # FIXED: Use detected bitrate instead of hardcoded 8M
                     
                     # Audio encoding with fade filter
                     "-c:a", "aac",
@@ -792,7 +1032,7 @@ class MP4LooperApp:
             else:
                 # No audio filter - even simpler
                 ffmpeg_cmd = [
-                    "ffmpeg", "-y",
+                    ffmpeg_path, "-y",
                     
                     # FIXED: Simplified GPU setup
                     "-hwaccel", "cuda",
@@ -809,10 +1049,10 @@ class MP4LooperApp:
                     "-map", "0:v:0",  # Video from first input
                     "-map", "1:a:0",  # Audio from second input
                     
-                    # FIXED: GPU encoding settings (simplified)
+                    # FIXED: GPU encoding settings with detected bitrate
                     "-c:v", "h264_nvenc",
                     "-preset", "fast", 
-                    "-b:v", "8M",
+                    "-b:v", source_bitrate,  # FIXED: Use detected bitrate instead of hardcoded 8M
                     
                     # Audio encoding (no filters)
                     "-c:a", "aac",
@@ -825,11 +1065,11 @@ class MP4LooperApp:
                     str(output_path)
                 ]
             
-            logging.info(f"🚀 Executing FIXED GPU FFmpeg command:")
+            logging.info(f"🚀 Executing GPU FFmpeg command with {source_bitrate} bitrate:")
             logging.info(f"Command: {' '.join(ffmpeg_cmd)}")
             
             # Update progress bar
-            ui.update_progress(10, f"Starting GPU render ({duration}s)...")
+            ui.update_progress(10, f"Starting GPU render ({duration}s, {source_bitrate})...")
             
             # Start FFmpeg process
             startupinfo = None
@@ -896,7 +1136,7 @@ class MP4LooperApp:
                                         progress_queue.put({
                                             'progress': progress_percent,
                                             'current_time': current_seconds,
-                                            'message': f"GPU Rendering: {int(progress_percent)}% ({int(current_seconds)}s / {duration}s)"
+                                            'message': f"GPU Rendering ({source_bitrate}): {int(progress_percent)}% ({int(current_seconds)}s / {duration}s)"
                                         })
                             
                             except Exception as e:
@@ -1016,7 +1256,7 @@ class MP4LooperApp:
                 )
                 return False
             
-            logging.info(f"✅ Output file created: {file_size // (1024*1024)}MB")
+            logging.info(f"✅ Output file created: {file_size // (1024*1024)}MB with {source_bitrate} bitrate")
             
             # Verify duration
             try:
@@ -1048,8 +1288,8 @@ class MP4LooperApp:
                         logging.debug(f"Could not delete {temp_path}: {e}")
             
             # Final success update
-            ui.update_progress(100, "✅ GPU render completed!")
-            logging.info("🎉 GPU video rendering completed successfully!")
+            ui.update_progress(100, f"✅ GPU render completed with {source_bitrate} bitrate!")
+            logging.info(f"🎉 GPU video rendering completed successfully with {source_bitrate} bitrate!")
             
             return True
             

@@ -1,6 +1,5 @@
 import os
 import logging
-import requests
 import random
 import sys
 import re
@@ -9,10 +8,11 @@ import subprocess
 
 from datetime import datetime
 
-from utils import get_base_path, format_duration
+from utils import get_base_path
 from post_render_check import get_wav_duration
 from google_services import get_sheets_service
 from api_monitor_module.utils.monitor_access import track_api_call_simple
+from ffmpeg_utils import find_executable
 
 logging.debug(f"✅ {os.path.basename(__file__)} loaded successfully")
 
@@ -280,8 +280,7 @@ class SongListGenerator:
                             continue
 
                         # Format timestamp
-                        h, m, s = format_duration(int(current_time))
-                        timestamp = f"{h:02d}:{m:02d}:{s:02d}"
+                        timestamp = format_timestamp_from_seconds(current_time)
                         
                         # Split song name for clean titles
                         if '_' in song:
@@ -329,14 +328,23 @@ class SongListGenerator:
 
         # Create temp music file with FFmpeg
         try:
+            # Import and use proper FFmpeg detection
+            
+            ffmpeg_path = find_executable("ffmpeg")
+            if not ffmpeg_path:
+                logging.error("❌ FFmpeg not found for temp music creation")
+                return False
+            
             extra_args = {}
             if sys.platform == "win32":
                 extra_args["creationflags"] = 0x08000000
 
             ffmpeg_cmd = [
-                "ffmpeg", "-y", "-f", "concat", "-safe", "0", 
+                ffmpeg_path, "-y", "-f", "concat", "-safe", "0", 
                 "-i", concat_file_path, "-c", "copy", temp_music_path
             ]
+            
+            logging.info(f"🎵 Creating temp music using: {ffmpeg_path}")
             
             result = subprocess.run(
                 ffmpeg_cmd, 
@@ -419,6 +427,7 @@ def generate_distributed_song_lists(sheet_url, distribution_settings, duration_i
         
         # Generate song lists for each video
         video_song_lists = []
+        concat_files_to_cleanup = []
         
         for i, (start_idx, end_idx, count) in enumerate(song_ranges):
             video_num = i + 1
@@ -478,13 +487,15 @@ def generate_distributed_song_lists(sheet_url, distribution_settings, duration_i
                         song_normalized = unicodedata.normalize("NFC", song)
                         wav_path = os.path.join(music_folder, f"{song_normalized}.wav")
                         
-                        timestamp = format_duration(current_time)
+                        timestamp = format_timestamp_from_seconds(current_time)
                         f.write(f"{timestamp} {song.split('_', 1)[-1]}\n")
                         
                         current_time += get_wav_duration(wav_path)
             
             # Create temp_music.wav for this video
             concat_file_path = os.path.join(output_folder, f"{base_name}_music_concat.txt")
+            concat_files_to_cleanup.append(concat_file_path)
+
             with open(concat_file_path, "w", encoding="utf-8") as f:
                 for song in selected_songs:
                     song_normalized = unicodedata.normalize("NFC", song)
@@ -493,15 +504,22 @@ def generate_distributed_song_lists(sheet_url, distribution_settings, duration_i
             
             # Generate temp music file
             temp_music_path = os.path.join(output_folder, f"{base_name}_temp_music.wav")
-            
+
+            ffmpeg_path = find_executable("ffmpeg")
+            if not ffmpeg_path:
+                logging.error(f"❌ FFmpeg not found for distributed temp music creation (video {video_num})")
+                return False
+
             extra_args = {}
             if sys.platform == "win32":
                 extra_args["creationflags"] = 0x08000000
-            
+
             ffmpeg_cmd = [
-                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                ffmpeg_path, "-y", "-f", "concat", "-safe", "0",
                 "-i", concat_file_path, "-c", "copy", temp_music_path
             ]
+
+            logging.info(f"🎵 Creating distributed temp music for video {video_num} using: {ffmpeg_path}")
             
             result = subprocess.run(
                 ffmpeg_cmd,
@@ -515,17 +533,21 @@ def generate_distributed_song_lists(sheet_url, distribution_settings, duration_i
                 logging.error(f"Failed to create temp music for video {video_num}")
                 return False
             
-            # Store info for this video
+            # Store info for this video - ADDED cleanup info
             video_song_lists.append({
                 'video_num': video_num,
                 'song_list_path': list_path,
                 'temp_music_path': temp_music_path,
                 'timestamp_path': timestamp_path,
-                'concat_file_path': concat_file_path,
+                'concat_file_path': concat_file_path,  # Keep this for reference
                 'songs_count': len(video_songs),
                 'loops': len(selected_songs) // len(video_songs),
                 'base_name': base_name
             })
+        
+        # ADDED: Store cleanup list in the return data
+        for video_info in video_song_lists:
+            video_info['_concat_files_to_cleanup'] = concat_files_to_cleanup
         
         logging.info(f"🎉 Created {len(video_song_lists)} distributed song lists")
         return video_song_lists
@@ -545,3 +567,10 @@ def generate_song_list_for_batch(sheet_url, output_filename, duration_in_seconds
         sheet_url, output_filename, duration_in_seconds, music_folder, 
         output_folder, new_song_count, export_song_list, export_timestamp
     )
+
+def format_timestamp_from_seconds(total_seconds):
+    """Convert total seconds to HH:MM:SS format"""
+    hours = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    seconds = int(total_seconds % 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"

@@ -1,21 +1,10 @@
 import sys
 import os
-import subprocess
 import tkinter as tk
 import logging
-import time
-import re
-import json
-import threading
 import ctypes
 
-from pathlib import Path
 from tkinter import messagebox
-
-from requests import HTTPError
-from paths import get_base_path
-
-from config import SERVICE_ACCOUNT_PATH
  
 class ToolTip(object):
     def __init__(self, widget, text='widget info'):
@@ -63,32 +52,6 @@ class ToolTip(object):
         if tw:
             tw.destroy()
 
-def update_total_duration(tree, label):
-        """Calculates and updates total duration displayed in a Treeview widget."""
-        total_seconds = 0
-        for item in tree.get_children():
-            dur_str = tree.item(item)["values"][2]
-            try:
-                mins, secs = dur_str.replace("s", "").split("m")
-                total_seconds += int(mins) * 60 + int(secs)
-            except:
-                continue
-        hrs, mins = divmod(total_seconds, 3600)
-        mins, secs = divmod(mins, 60)
-        label.config(text=f"Total Duration: {hrs}h {mins}m {secs}s")
-
-def toggle_new_song_input(entry_widget, checkbox_var):
-    if checkbox_var.get():
-        entry_widget.configure(state="disabled")
-        entry_widget.delete(0, "end")
-        entry_widget.insert(0, "5")
-        logging.debug("Use default song count checkbox checked. Reset to 5.")
-    else:
-        entry_widget.configure(state="normal")
-        logging.debug("Use default song count checkbox unchecked. Allowing user input.")
-
-    logging.debug(f"Current song count input value: {entry_widget.get()}")
-
 def setup_logging():
     # Use the same directory logic as auth storage
     if getattr(sys, 'frozen', False):
@@ -126,136 +89,11 @@ def setup_logging():
     logging.debug("✅ Logging initialized")
     logging.debug(f"Debug log location: {log_path}")
 
-def restart_app():
-    try:
-        logging.info("🔁 Restarting app now...")
-        if getattr(sys, 'frozen', False):
-            # We're running as a compiled .exe (PyInstaller)
-            exe_path = sys.executable
-            logging.debug(f"Restarting frozen executable: {exe_path}")
-            os.execv(exe_path, [exe_path])
-        else:
-            # We're running as a normal .py script
-            python = sys.executable
-            script = os.path.abspath(sys.argv[0])
-            logging.debug(f"Restarting script: {python} {script}")
-            os.execl(python, python, script)
-    except Exception as e:
-        logging.error(f"❌ Failed to restart app: {e}")
-
 def open_folder(path, label="Folder", parent_window=None):
     if os.path.isdir(path):
         os.startfile(path)
     else:
         messagebox.showerror(f"{label} Error", f"The {label.lower()} does not exist:\n{path}", parent=parent_window)
-
-FOLDER_ID_MAP_PATH = Path(get_base_path()) / "folder_id_map.json"
-
-def load_folder_id_map():
-    if FOLDER_ID_MAP_PATH.exists():
-        with open(FOLDER_ID_MAP_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-def save_folder_id_map(map_data):
-    with open(FOLDER_ID_MAP_PATH, "w", encoding="utf-8") as f:
-        json.dump(map_data, f, indent=2)
-
-def get_or_create_folder_cached(folder_name, parent_folder_id, drive_service):
-    folder_map = load_folder_id_map()
-    if folder_name in folder_map:
-        return folder_map[folder_name]
-
-    logging.debug(f"📁 Folder '{folder_name}' not cached — pulling all subfolders...")
-
-    try:
-        query = (
-            f"'{parent_folder_id}' in parents and "
-            f"mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        )
-
-        all_folders = drive_service.files().list(
-            q=query,
-            spaces="drive",
-            fields="files(id, name, createdTime)",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-            pageSize=1000
-        ).execute().get("files", [])
-
-        for folder in all_folders:
-            if folder["name"] == folder_name:
-                folder_id = folder["id"]
-                folder_map[folder_name] = folder_id
-                save_folder_id_map(folder_map)
-                logging.info(f"📁 Reused existing folder '{folder_name}' → {folder_id}")
-                return folder_id
-
-        # Not found, create
-        file_metadata = {
-            "name": folder_name,
-            "mimeType": "application/vnd.google-apps.folder",
-            "parents": [parent_folder_id],
-        }
-
-        folder = drive_service.files().create(
-            body=file_metadata,
-            fields="id",
-            supportsAllDrives=True
-        ).execute()
-
-        folder_id = folder["id"]
-        folder_map[folder_name] = folder_id
-        save_folder_id_map(folder_map)
-        logging.info(f"📁 Created new folder '{folder_name}' → {folder_id}")
-        return folder_id
-
-    except HTTPError as e:
-        logging.error(f"❌ Drive error on folder lookup/create: {e}")
-        return None
-
-def extract_drive_folder_id(url_or_id):
-    """Extracts folder ID from a full Drive URL or returns the ID if already clean."""
-    match = re.search(r"/folders/([a-zA-Z0-9_-]+)", url_or_id)
-    return match.group(1) if match else url_or_id
-
-UPLOADER_WORKER_PATH = os.path.join(get_base_path(), "uploader_worker.py")
-
-bat_path = os.path.join(get_base_path(), "launch_upload.bat")
-
-def upload_large_file_subprocess(file_path, folder_id, file_name, progress_callback=None, done_callback=None):
-    def run_upload():
-        try:
-            full_cmd = [
-                sys.executable,  # full Python path (even in frozen .exe)
-                UPLOADER_WORKER_PATH,
-                file_path,
-                folder_id,
-                file_name,
-                SERVICE_ACCOUNT_PATH,
-            ]
-
-            process = subprocess.Popen(
-                full_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-                cwd=get_base_path()
-            )
-
-            if progress_callback:
-                progress_callback(0.0)
-
-            if done_callback:
-                done_callback()
-
-        except Exception as e:
-            logging.error(f"❌ Upload subprocess failed: {e}")
-            if done_callback:
-                done_callback()
-
-    threading.Thread(target=run_upload, daemon=True).start()
 
 def get_canceled_upload_folder_path():
     return os.path.join(

@@ -858,6 +858,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
 
     def on_drop(self, event):
         """Handle drag and drop of files with improved feedback"""
+        # Check if we're currently processing - this replaces the disabled state check
         if self.rendering:
             messagebox.showwarning("Processing in Progress", "Cannot add files while processing.")
             return
@@ -1024,7 +1025,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
         self.controller.clean_canceled_uploads(self)
 
     def start_processing(self):
-        """Start processing the queued files - UPDATED with distribution mode support"""
+        """Start processing the queued files - FIXED with proper distribution mode support"""
         if not self.file_paths:
             messagebox.showwarning("No Files", "No files are queued for processing")
             return
@@ -1036,8 +1037,9 @@ class BatchProcessorUI(TkinterDnD.Tk):
         if not self.controller.handle_song_csv_validation(self.sheet_entry.get().strip()):
             return
         
-        # Check if we're in distribution mode
-        distribution_mode = hasattr(self.controller, 'distribution_settings') and self.controller.distribution_settings
+        # FIXED: Check if we're in distribution mode - improved check
+        distribution_mode = (hasattr(self.controller, 'distribution_settings') and 
+                            self.controller.distribution_settings is not None)
         
         if distribution_mode:
             # Show distribution mode confirmation
@@ -1046,15 +1048,33 @@ class BatchProcessorUI(TkinterDnD.Tk):
             method = distribution_settings['distribution_method']
             
             confirm_msg = (
-                f"Start Distribution Mode Processing?\n\n"
+                f"🎵 Start Distribution Mode Processing?\n\n"
                 f"• Number of videos: {num_videos}\n"
                 f"• Distribution method: {method.title()}\n"
                 f"• Source files: {len(self.file_paths)}\n\n"
-                f"This will create {num_videos} videos with unique song combinations."
+                f"This will create {num_videos} videos with unique song combinations.\n\n"
+                f"💡 Tip: Close the Distribution Modal to return to normal mode."
             )
             
             if not messagebox.askyesno("Confirm Distribution Processing", confirm_msg, parent=self):
                 return
+                
+            logging.info(f"🎵 Starting distribution mode: {num_videos} videos, {method} method")
+        else:
+            # FIXED: Normal mode - show standard confirmation
+            confirm_msg = (
+                f"▶ Start Normal Processing?\n\n"
+                f"• Number of files: {len(self.file_paths)}\n"
+                f"• Processing mode: One video per file\n"
+                f"• Output: Individual videos\n\n"
+                f"Each file will be processed separately with the same settings.\n\n"
+                f"💡 Tip: Use 'Song Distribution' button for multiple videos from one file."
+            )
+            
+            if not messagebox.askyesno("Confirm Normal Processing", confirm_msg, parent=self):
+                return
+                
+            logging.info(f"▶ Starting normal mode: {len(self.file_paths)} files")
         
         # Lock the UI during processing
         self.lock_ui_during_processing()
@@ -1077,37 +1097,38 @@ class BatchProcessorUI(TkinterDnD.Tk):
             "transition": self.transition_var.get()
         }
         
-        # Update UI status
+        # Update UI status based on mode
         if distribution_mode:
             self.progress_var.set("Starting distribution mode processing...")
             self.status_label.configure(text=f"🎵 Distribution Mode: {num_videos} videos")
         else:
-            self.progress_var.set("Starting batch processing...")
+            self.progress_var.set("Starting normal processing...")
+            self.status_label.configure(text=f"▶ Normal Mode: {len(self.file_paths)} files")
         
         # Start processing thread
         threading.Thread(target=self.controller.process_files, args=(params, self), daemon=True).start()
 
     def lock_ui_during_processing(self):
-        """Lock UI elements during processing to prevent interference"""
-        # Disable file management
-        self.drop_area.configure(state="disabled")
+        """Lock UI elements during processing to prevent interference - COMPLETE FIX"""
+        # Set rendering flag
+        self.rendering = True
         
-        # Disable all buttons except stop
+        # Disable ALL buttons except stop - COMPLETE LIST
         buttons_to_disable = [
-            'browse_files_button',
-            'clear_button', 
-            'remove_selected_button',
-            'distribution_button',
-            'upload_button'
+            "Browse Files", 
+            "🗑 Clear Queue", 
+            "Remove Selected", 
+            "🎵 Song Distribution", 
+            "📤 Upload to Drive",
+            # Duration adjustment buttons
+            "+1h", "+3h", "+11h", "-1h", "-3h", "-11h",
+            # Folder management buttons
+            "Browse",  # Output and Music folder browse buttons
+            "Open",    # Output and Music folder open buttons  
+            "Clean"    # Output folder clean button
         ]
         
-        # Find and disable buttons (they might have different names in your actual code)
-        for widget in self.winfo_children():
-            if hasattr(widget, 'winfo_children'):
-                for child in widget.winfo_children():
-                    if isinstance(child, ctk.CTkButton):
-                        if child.cget("text") in ["Browse Files", "🗑 Clear Queue", "Remove Selected", "🎵 Song Distribution", "📤 Upload to Drive"]:
-                            child.configure(state="disabled")
+        self._disable_buttons_by_text(buttons_to_disable)
         
         # Disable input fields
         input_fields = [
@@ -1120,7 +1141,10 @@ class BatchProcessorUI(TkinterDnD.Tk):
         
         for field in input_fields:
             if hasattr(field, 'configure'):
-                field.configure(state="disabled")
+                try:
+                    field.configure(state="disabled")
+                except Exception as e:
+                    logging.debug(f"Could not disable field: {e}")
         
         # Disable checkboxes
         checkboxes = [
@@ -1132,11 +1156,23 @@ class BatchProcessorUI(TkinterDnD.Tk):
         
         for checkbox in checkboxes:
             if hasattr(checkbox, 'configure'):
-                checkbox.configure(state="disabled")
+                try:
+                    checkbox.configure(state="disabled")
+                except Exception as e:
+                    logging.debug(f"Could not disable checkbox: {e}")
         
-        # Disable dropdown
-        if hasattr(self, 'transition_dropdown'):
-            self.transition_dropdown.configure(state="disabled")
+        # Disable dropdowns
+        dropdowns = [
+            self.sheet_dropdown,
+            self.transition_dropdown
+        ]
+        
+        for dropdown in dropdowns:
+            if hasattr(dropdown, 'configure'):
+                try:
+                    dropdown.configure(state="disabled")
+                except Exception as e:
+                    logging.debug(f"Could not disable dropdown: {e}")
         
         # Update start/stop buttons
         self.start_button.configure(state="disabled", text="🔄 Processing...")
@@ -1149,19 +1185,54 @@ class BatchProcessorUI(TkinterDnD.Tk):
         
         # Show processing indicator in status
         self.status_label.configure(text="🔄 Processing in progress - UI locked", text_color="#ffc107")
+        
+        logging.info("🔒 UI fully locked during processing")
+
+    def _disable_buttons_by_text(self, button_texts):
+        """Helper method to find and disable buttons by their text"""
+        def search_and_disable(widget):
+            try:
+                # Check if this widget is a button with matching text
+                if hasattr(widget, 'cget') and hasattr(widget, 'configure'):
+                    try:
+                        button_text = widget.cget("text")
+                        if button_text in button_texts:
+                            widget.configure(state="disabled")
+                            logging.debug(f"Disabled button: {button_text}")
+                    except:
+                        pass  # Not a button or can't get text
+                
+                # Recursively search child widgets
+                if hasattr(widget, 'winfo_children'):
+                    for child in widget.winfo_children():
+                        search_and_disable(child)
+            except Exception as e:
+                logging.debug(f"Error searching widget: {e}")
+        
+        # Start search from the main window
+        search_and_disable(self)
 
     def unlock_ui_after_processing(self):
-        """Unlock UI elements after processing is complete"""
-        # Re-enable file management
-        self.drop_area.configure(state="normal")
+        """Unlock UI elements after processing is complete - COMPLETE UNLOCK"""
+        # Reset rendering flag
+        self.rendering = False
         
-        # Re-enable all buttons
-        for widget in self.winfo_children():
-            if hasattr(widget, 'winfo_children'):
-                for child in widget.winfo_children():
-                    if isinstance(child, ctk.CTkButton):
-                        if child.cget("text") in ["Browse Files", "🗑 Clear Queue", "Remove Selected", "🎵 Song Distribution", "📤 Upload to Drive"]:
-                            child.configure(state="normal")
+        # Re-enable ALL buttons
+        buttons_to_enable = [
+            "Browse Files", 
+            "🗑 Clear Queue", 
+            "Remove Selected", 
+            "🎵 Song Distribution", 
+            "📤 Upload to Drive",
+            # Duration adjustment buttons
+            "+1h", "+3h", "+11h", "-1h", "-3h", "-11h",
+            # Folder management buttons
+            "Browse",  # Output and Music folder browse buttons
+            "Open",    # Output and Music folder open buttons
+            "Clean"    # Output folder clean button
+        ]
+        
+        self._enable_buttons_by_text(buttons_to_enable)
         
         # Re-enable input fields
         input_fields = [
@@ -1173,7 +1244,10 @@ class BatchProcessorUI(TkinterDnD.Tk):
         
         for field in input_fields:
             if hasattr(field, 'configure'):
-                field.configure(state="normal")
+                try:
+                    field.configure(state="normal")
+                except Exception as e:
+                    logging.debug(f"Could not enable field: {e}")
         
         # Re-enable checkboxes
         checkboxes = [
@@ -1185,11 +1259,23 @@ class BatchProcessorUI(TkinterDnD.Tk):
         
         for checkbox in checkboxes:
             if hasattr(checkbox, 'configure'):
-                checkbox.configure(state="normal")
+                try:
+                    checkbox.configure(state="normal")
+                except Exception as e:
+                    logging.debug(f"Could not enable checkbox: {e}")
         
-        # Re-enable dropdown
-        if hasattr(self, 'transition_dropdown'):
-            self.transition_dropdown.configure(state="normal")
+        # Re-enable dropdowns
+        dropdowns = [
+            self.sheet_dropdown,
+            self.transition_dropdown
+        ]
+        
+        for dropdown in dropdowns:
+            if hasattr(dropdown, 'configure'):
+                try:
+                    dropdown.configure(state="normal")
+                except Exception as e:
+                    logging.debug(f"Could not enable dropdown: {e}")
         
         # Handle song count entry based on checkbox state
         self.toggle_song_count()
@@ -1209,6 +1295,31 @@ class BatchProcessorUI(TkinterDnD.Tk):
             self.status_label.configure(text=f"📄 {count} file{'s' if count > 1 else ''} queued", text_color="#00bfff")
         else:
             self.status_label.configure(text="Drag video files here", text_color="#00bfff")
+        
+        logging.info("🔓 UI fully unlocked after processing")
+
+    def _enable_buttons_by_text(self, button_texts):
+        """Helper method to find and enable buttons by their text"""
+        def search_and_enable(widget):
+            try:
+                # Check if this widget is a button with matching text
+                if hasattr(widget, 'cget') and hasattr(widget, 'configure'):
+                    try:
+                        button_text = widget.cget("text")
+                        if button_text in button_texts:
+                            widget.configure(state="normal")
+                    except:
+                        pass  # Not a button or can't get text
+                
+                # Recursively search child widgets
+                if hasattr(widget, 'winfo_children'):
+                    for child in widget.winfo_children():
+                        search_and_enable(child)
+            except Exception as e:
+                logging.debug(f"Error searching widget: {e}")
+        
+        # Start search from the main window
+        search_and_enable(self)
 
     def validate_inputs(self):
         """Validate all required inputs"""

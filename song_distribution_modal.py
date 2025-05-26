@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox
+import logging
 from utils import center_window
 from icon_helper import set_window_icon
 
@@ -54,6 +54,9 @@ class SongPoolDistributionModal(tk.Toplevel):
         
         # Center window
         center_window(self)
+
+        # Set up close protocol to clear distribution mode
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
     
     def create_compact_ui(self):
         """Create compact UI using horizontal layout"""
@@ -612,5 +615,15 @@ class SongPoolDistributionModal(tk.Toplevel):
         return song_ranges
     
     def cancel(self):
-        """Cancel and close"""
+        """Cancel and close - clear distribution mode"""
+        if hasattr(self.controller, 'distribution_settings'):
+            self.controller.distribution_settings = None
+            logging.info("🎵 Distribution mode cancelled")
+        self.destroy()
+
+    def on_close(self):
+        """Handle modal close - clear distribution mode"""
+        if hasattr(self.controller, 'distribution_settings'):
+            self.controller.distribution_settings = None
+            logging.info("🎵 Distribution mode disabled - modal closed")
         self.destroy()
