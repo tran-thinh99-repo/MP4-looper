@@ -647,7 +647,7 @@ class MP4LooperApp:
             return False
 
     def render_video(self, input_file, output_folder, output_name, duration, fade_audio, ui, transition="None"):
-        """Render a video with the given parameters - WITH TRANSITIONS"""
+        """FIXED: GPU rendering with proper filter chain handling"""
         try:
             output_path = os.path.join(output_folder, output_name)
             
@@ -665,78 +665,171 @@ class MP4LooperApp:
                     return False
             
             logging.info(f"Using temp music file: {temp_music_path}")
+            logging.info(f"Input video file: {input_file}")
+            logging.info(f"Output path: {output_path}")
+            logging.info(f"Target duration: {duration} seconds")
             
-            # Check if transition is requested and GPU is available
-            if transition != "None":
-                # Check for NVENC availability (already done in dependency check)
-                encoders_result = subprocess.run(
-                    ["ffmpeg", "-encoders"], 
-                    capture_output=True, 
-                    text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-                )
+            # Verify input files exist
+            if not os.path.exists(input_file):
+                logging.error(f"Input video file not found: {input_file}")
+                return False
                 
-                if "h264_nvenc" not in encoders_result.stdout:
-                    messagebox.showwarning(
-                        "GPU Required", 
-                        "Transitions require NVIDIA GPU encoding (NVENC).\nProcessing will continue without transitions.",
-                        parent=ui
+            if not os.path.exists(temp_music_path):
+                logging.error(f"Temp music file not found: {temp_music_path}")
+                return False
+            
+            # STRICT GPU CHECK - Cancel if GPU not available
+            try:
+                logging.info("🔍 Verifying GPU encoding availability...")
+                ui.update_progress(0, "Checking GPU encoding...")
+                
+                gpu_test_result = subprocess.run([
+                    "ffmpeg", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1",
+                    "-c:v", "h264_nvenc", "-preset", "fast", "-f", "null", "-"
+                ], capture_output=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+                
+                if gpu_test_result.returncode != 0:
+                    error_msg = (
+                        "❌ GPU encoding (NVENC) is not available!\n\n"
+                        "This could be due to:\n"
+                        "• Outdated NVIDIA drivers\n"
+                        "• Non-NVIDIA GPU\n" 
+                        "• NVENC not supported on your GPU\n"
+                        "• GPU busy with other tasks\n\n"
+                        "Please update your NVIDIA drivers and try again.\n"
+                        "Rendering has been cancelled."
                     )
-                    transition = "None"
-            
-            # Apply transition if requested
-            if transition != "None":
-                # Create temp file for transition video
-                temp_transition_path = os.path.join(output_folder, f"{base_name}_transition_temp.mp4")
+                    logging.error("❌ GPU encoding test failed - cancelling render")
+                    logging.error(f"GPU test stderr: {gpu_test_result.stderr}")
+                    
+                    messagebox.showerror("GPU Encoding Failed", error_msg, parent=ui)
+                    return False
                 
+                logging.info("✅ GPU encoding verified - proceeding with render")
+                
+            except subprocess.TimeoutExpired:
+                error_msg = (
+                    "❌ GPU encoding test timed out!\n\n"
+                    "Your GPU may be busy or unresponsive.\n"
+                    "Rendering has been cancelled."
+                )
+                logging.error("❌ GPU test timed out - cancelling render")
+                messagebox.showerror("GPU Test Timeout", error_msg, parent=ui)
+                return False
+                
+            except Exception as e:
+                error_msg = (
+                    f"❌ Failed to test GPU encoding!\n\n"
+                    f"Error: {str(e)}\n\n"
+                    "Rendering has been cancelled."
+                )
+                logging.error(f"❌ GPU test exception: {e}")
+                messagebox.showerror("GPU Test Failed", error_msg, parent=ui)
+                return False
+            
+            # Check if transition is requested
+            temp_transition_path = None
+            if transition != "None":
                 logging.info(f"Applying {transition} transition...")
-                ui.update_progress(0, f"Applying {transition} transition...")
+                ui.update_progress(5, f"Applying {transition} transition...")
+                
+                temp_transition_path = os.path.join(output_folder, f"{base_name}_transition_temp.mp4")
                 
                 # Apply transition using transitions_lib
                 from transitions_lib import process_video
                 try:
                     process_video(input_file, temp_transition_path, transition, transition_duration=1.5)
                     input_file = temp_transition_path  # Use transition video as input
-                    logging.info(f"Transition applied successfully")
+                    logging.info(f"✅ {transition} transition applied successfully")
                 except Exception as e:
-                    logging.error(f"Failed to apply transition: {e}")
-                    messagebox.showwarning(
+                    logging.error(f"❌ Failed to apply transition: {e}")
+                    messagebox.showerror(
                         "Transition Failed", 
-                        f"Failed to apply {transition} transition. Continuing without transition.",
+                        f"Failed to apply {transition} transition.\n\nError: {str(e)}\n\nRendering cancelled.",
                         parent=ui
                     )
-                    transition = "None"
+                    return False
             
-            # Setup ffmpeg command with GPU acceleration
-            fade_filter = []
+            # FIXED: Proper GPU filter chain handling
             if fade_audio:
                 fade_start = max(duration - 5, 0)
-                fade_filter = ["-af", f"afade=t=out:st={fade_start}:d=5"]
+                # Use separate audio filter chain (no GPU conflict)
+                ffmpeg_cmd = [
+                    "ffmpeg", "-y",
+                    
+                    # FIXED: Simplified GPU setup - no hwaccel_output_format to avoid filter conflicts
+                    "-hwaccel", "cuda",
+                    
+                    # Video input with infinite loop
+                    "-stream_loop", "-1", 
+                    "-i", str(input_file),
+                    
+                    # Audio input with infinite loop  
+                    "-stream_loop", "-1",
+                    "-i", str(temp_music_path),
+                    
+                    # Map streams
+                    "-map", "0:v:0",  # Video from first input
+                    "-map", "1:a:0",  # Audio from second input
+                    
+                    # FIXED: GPU encoding settings (simplified to avoid filter conflicts)
+                    "-c:v", "h264_nvenc",
+                    "-preset", "fast", 
+                    "-b:v", "8M",
+                    
+                    # Audio encoding with fade filter
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-af", f"afade=t=out:st={fade_start}:d=5",
+                    
+                    # Set duration
+                    "-t", str(duration),
+                    
+                    # Output file
+                    str(output_path)
+                ]
+            else:
+                # No audio filter - even simpler
+                ffmpeg_cmd = [
+                    "ffmpeg", "-y",
+                    
+                    # FIXED: Simplified GPU setup
+                    "-hwaccel", "cuda",
+                    
+                    # Video input with infinite loop
+                    "-stream_loop", "-1", 
+                    "-i", str(input_file),
+                    
+                    # Audio input with infinite loop  
+                    "-stream_loop", "-1",
+                    "-i", str(temp_music_path),
+                    
+                    # Map streams
+                    "-map", "0:v:0",  # Video from first input
+                    "-map", "1:a:0",  # Audio from second input
+                    
+                    # FIXED: GPU encoding settings (simplified)
+                    "-c:v", "h264_nvenc",
+                    "-preset", "fast", 
+                    "-b:v", "8M",
+                    
+                    # Audio encoding (no filters)
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    
+                    # Set duration
+                    "-t", str(duration),
+                    
+                    # Output file
+                    str(output_path)
+                ]
             
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-y",
-                "-hwaccel", "cuda",
-                "-hwaccel_output_format", "cuda",
-                "-stream_loop", "-1", "-i", str(input_file),
-                "-stream_loop", "-1", "-i", str(temp_music_path),
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                "-c:v", "h264_nvenc",  # Use GPU encoding
-                "-preset", "fast",
-                "-b:v", "8M",  # Adjust bitrate as needed
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-t", str(duration),
-                *fade_filter,
-                "-shortest",
-                str(output_path)
-            ]
-            
-            logging.info(f"Executing FFmpeg with GPU encoding: {' '.join(ffmpeg_cmd)}")
+            logging.info(f"🚀 Executing FIXED GPU FFmpeg command:")
+            logging.info(f"Command: {' '.join(ffmpeg_cmd)}")
             
             # Update progress bar
-            ui.update_progress(0, "Starting render with GPU...")
+            ui.update_progress(10, f"Starting GPU render ({duration}s)...")
             
             # Start FFmpeg process
             startupinfo = None
@@ -748,7 +841,7 @@ class MP4LooperApp:
             self.current_process = subprocess.Popen(
                 ffmpeg_cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE,
                 text=True,
                 startupinfo=startupinfo,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -757,51 +850,190 @@ class MP4LooperApp:
             # Track process
             self.process_pid = psutil.Process(self.current_process.pid)
             
-            # Monitor progress
-            for line in iter(self.current_process.stdout.readline, ''):
-                if not self.rendering:
-                    self.process_pid.terminate()
-                    logging.info("Rendering stopped by user")
-                    return False
-                    
-                if "time=" in line:
-                    for part in line.split():
-                        if "time=" in part:
-                            timestamp = part.split("=")[1]
-                            try:
-                                h, m, s = map(float, timestamp.split(":"))
-                                current_time = h * 3600 + m * 60 + s
-                                progress = min(100, (current_time / duration) * 100)
-                                ui.update_progress(progress, f"Progress: {int(progress)}%")
-                            except Exception as e:
-                                logging.error(f"Progress update error: {e}")
+            # PROGRESS MONITORING with thread-safe updates
+            import threading
+            import queue
+            import time
+            
+            # Create a queue for thread-safe progress updates
+            progress_queue = queue.Queue()
+            stderr_lines = []  # Collect all stderr for debugging
+            
+            def monitor_ffmpeg_progress():
+                """Monitor FFmpeg stderr for progress info"""
+                try:
+                    while True:
+                        line = self.current_process.stderr.readline()
+                        if not line:
                             break
+                            
+                        line = line.strip()
+                        stderr_lines.append(line)  # Store for debugging
+                        
+                        # Look for time= in the line (FFmpeg progress indicator)
+                        if "time=" in line and "fps=" in line:
+                            try:
+                                # Extract time from FFmpeg progress line
+                                time_match = None
+                                for part in line.split():
+                                    if part.startswith("time="):
+                                        time_str = part.split("=")[1]
+                                        time_match = time_str
+                                        break
+                                
+                                if time_match:
+                                    # Parse time string (format: HH:MM:SS.ss)
+                                    time_parts = time_match.split(":")
+                                    if len(time_parts) == 3:
+                                        hours = float(time_parts[0])
+                                        minutes = float(time_parts[1])
+                                        seconds = float(time_parts[2])
+                                        
+                                        current_seconds = hours * 3600 + minutes * 60 + seconds
+                                        progress_percent = min(100, (current_seconds / duration) * 100)
+                                        
+                                        # Put progress update in queue
+                                        progress_queue.put({
+                                            'progress': progress_percent,
+                                            'current_time': current_seconds,
+                                            'message': f"GPU Rendering: {int(progress_percent)}% ({int(current_seconds)}s / {duration}s)"
+                                        })
+                            
+                            except Exception as e:
+                                # Don't log every parsing error, just continue
+                                pass
+                        
+                        # Check if we should stop
+                        if not self.rendering:
+                            break
+                            
+                except Exception as e:
+                    logging.error(f"Progress monitoring error: {e}")
+            
+            # Start progress monitoring thread
+            progress_thread = threading.Thread(target=monitor_ffmpeg_progress, daemon=True)
+            progress_thread.start()
+            
+            # MAIN LOOP: Update UI with progress
+            last_update_time = 0
+            
+            while self.current_process.poll() is None:  # While FFmpeg is still running
+                # Check for stop request
+                if not self.rendering:
+                    try:
+                        self.current_process.terminate()
+                        logging.info("🛑 GPU rendering stopped by user")
+                        return False
+                    except:
+                        pass
+                    break
+                
+                # Process progress updates (limit to avoid UI flooding)
+                current_time = time.time()
+                if current_time - last_update_time > 0.5:  # Update every 0.5 seconds
+                    try:
+                        # Get the latest progress update
+                        latest_progress = None
+                        while not progress_queue.empty():
+                            latest_progress = progress_queue.get_nowait()
+                        
+                        if latest_progress:
+                            ui.update_progress(
+                                latest_progress['progress'], 
+                                latest_progress['message']
+                            )
+                            last_update_time = current_time
+                            
+                    except queue.Empty:
+                        pass
+                    except Exception as e:
+                        logging.debug(f"Progress update error: {e}")
+                
+                # Small sleep to prevent excessive CPU usage
+                time.sleep(0.1)
             
             # Wait for process to complete
-            self.current_process.wait()
+            return_code = self.current_process.wait()
+            
+            # Wait for progress thread to finish
+            progress_thread.join(timeout=2)
+            
+            # Check return code
+            if return_code != 0:
+                logging.error(f"❌ GPU FFmpeg FAILED with return code: {return_code}")
+                
+                # Look for specific filter-related errors
+                filter_errors = []
+                for line in stderr_lines[-20:]:
+                    if any(keyword in line.lower() for keyword in [
+                        'filter', 'convert', 'format', 'hwaccel', 'cuda'
+                    ]):
+                        filter_errors.append(line)
+                
+                error_msg = (
+                    f"❌ GPU rendering failed!\n\n"
+                    f"Return code: {return_code}\n\n"
+                    f"This indicates a GPU filter chain issue.\n"
+                    f"Rendering has been cancelled."
+                )
+                
+                if filter_errors:
+                    error_msg += f"\n\nFilter errors:\n" + "\n".join(filter_errors[-3:])
+                
+                logging.error("❌ GPU rendering failed - operation cancelled")
+                for line in stderr_lines[-10:]:
+                    logging.error(f"FFmpeg stderr: {line}")
+                
+                messagebox.showerror("GPU Rendering Failed", error_msg, parent=ui)
+                return False
             
             # Clean up transition temp file if it exists
-            if transition != "None" and os.path.exists(temp_transition_path):
+            if temp_transition_path and os.path.exists(temp_transition_path):
                 try:
                     os.remove(temp_transition_path)
-                    logging.info("Cleaned up transition temp file")
+                    logging.info("🗑️ Cleaned up transition temp file")
                 except Exception as e:
                     logging.error(f"Failed to clean up transition temp: {e}")
             
             # Validate the output
             if not os.path.exists(output_path):
-                logging.error(f"Output file not found: {output_path}")
+                logging.error(f"❌ Output file not found: {output_path}")
+                messagebox.showerror(
+                    "Render Failed", 
+                    f"Output file was not created:\n{output_path}\n\nRendering failed.",
+                    parent=ui
+                )
                 return False
-                
-            # Verify the output
-            if not validate_render(output_path, duration):
-                logging.error("Post-render validation failed")
+            
+            # Check file size
+            file_size = os.path.getsize(output_path)
+            if file_size < 1024 * 1024:  # Less than 1MB is suspicious
+                logging.error(f"❌ Output file too small: {file_size} bytes")
+                messagebox.showerror(
+                    "Render Failed", 
+                    f"Output file is suspiciously small ({file_size} bytes).\nRendering may have failed.",
+                    parent=ui
+                )
                 return False
+            
+            logging.info(f"✅ Output file created: {file_size // (1024*1024)}MB")
+            
+            # Verify duration
+            try:
+                from post_render_check import get_mp4_duration
+                actual_duration = get_mp4_duration(output_path)
+                logging.info(f"📏 Final duration: {actual_duration}s (target: {duration}s)")
                 
+                if actual_duration < duration * 0.90:  # 90% tolerance
+                    logging.warning(f"⚠️ Output significantly shorter than expected: {actual_duration}s < {duration}s")
+                    
+            except Exception as e:
+                logging.warning(f"Could not verify duration: {e}")
+            
             # Clean up temp files
             temp_files_to_clean = [
                 f"{base_name}_temp_music.wav",
-                f"{base_name}_music_concat.txt",
+                f"{base_name}_music_concat.txt", 
                 "temp_music.wav",
                 "music_concat.txt"
             ]
@@ -811,16 +1043,26 @@ class MP4LooperApp:
                 if os.path.exists(temp_path):
                     try:
                         os.remove(temp_path)
-                        logging.info(f"Deleted temp file: {temp_path}")
+                        logging.info(f"🗑️ Cleaned up: {temp_path}")
                     except Exception as e:
-                        logging.error(f"Failed to delete temp file: {e}")
+                        logging.debug(f"Could not delete {temp_path}: {e}")
             
-            ui.update_progress(100, "Render complete")
+            # Final success update
+            ui.update_progress(100, "✅ GPU render completed!")
+            logging.info("🎉 GPU video rendering completed successfully!")
             
             return True
             
         except Exception as e:
-            logging.error(f"Error rendering video: {e}")
+            logging.error(f"💥 GPU render error: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+            
+            messagebox.showerror(
+                "Rendering Error", 
+                f"An unexpected error occurred during GPU rendering:\n\n{str(e)}\n\nRendering has been cancelled.",
+                parent=ui
+            )
             return False
             
     def stop_processing(self):

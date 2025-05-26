@@ -1024,7 +1024,7 @@ class BatchProcessorUI(TkinterDnD.Tk):
         self.controller.clean_canceled_uploads(self)
 
     def start_processing(self):
-        """Start processing the queued files"""
+        """Start processing the queued files - UPDATED with distribution mode support"""
         if not self.file_paths:
             messagebox.showwarning("No Files", "No files are queued for processing")
             return
@@ -1035,14 +1035,33 @@ class BatchProcessorUI(TkinterDnD.Tk):
         # Validate song list CSV
         if not self.controller.handle_song_csv_validation(self.sheet_entry.get().strip()):
             return
+        
+        # Check if we're in distribution mode
+        distribution_mode = hasattr(self.controller, 'distribution_settings') and self.controller.distribution_settings
+        
+        if distribution_mode:
+            # Show distribution mode confirmation
+            distribution_settings = self.controller.distribution_settings
+            num_videos = distribution_settings['num_videos']
+            method = distribution_settings['distribution_method']
             
+            confirm_msg = (
+                f"Start Distribution Mode Processing?\n\n"
+                f"• Number of videos: {num_videos}\n"
+                f"• Distribution method: {method.title()}\n"
+                f"• Source files: {len(self.file_paths)}\n\n"
+                f"This will create {num_videos} videos with unique song combinations."
+            )
+            
+            if not messagebox.askyesno("Confirm Distribution Processing", confirm_msg, parent=self):
+                return
+        
+        # Lock the UI during processing
+        self.lock_ui_during_processing()
+        
         self.rendering = True
         self.was_stopped = False
         self.current_file_index = 0
-        
-        # Update UI state
-        self.start_button.configure(state="disabled")
-        self.stop_button.configure(state="normal")
         
         # Get processing parameters
         params = {
@@ -1055,11 +1074,141 @@ class BatchProcessorUI(TkinterDnD.Tk):
             "export_timestamp": self.export_timestamp_var.get(),
             "fade_audio": self.fade_audio_var.get(),
             "auto_upload": self.auto_upload_var.get(),
-            "transition": self.transition_var.get()  # ADD THIS
+            "transition": self.transition_var.get()
         }
+        
+        # Update UI status
+        if distribution_mode:
+            self.progress_var.set("Starting distribution mode processing...")
+            self.status_label.configure(text=f"🎵 Distribution Mode: {num_videos} videos")
+        else:
+            self.progress_var.set("Starting batch processing...")
         
         # Start processing thread
         threading.Thread(target=self.controller.process_files, args=(params, self), daemon=True).start()
+
+    def lock_ui_during_processing(self):
+        """Lock UI elements during processing to prevent interference"""
+        # Disable file management
+        self.drop_area.configure(state="disabled")
+        
+        # Disable all buttons except stop
+        buttons_to_disable = [
+            'browse_files_button',
+            'clear_button', 
+            'remove_selected_button',
+            'distribution_button',
+            'upload_button'
+        ]
+        
+        # Find and disable buttons (they might have different names in your actual code)
+        for widget in self.winfo_children():
+            if hasattr(widget, 'winfo_children'):
+                for child in widget.winfo_children():
+                    if isinstance(child, ctk.CTkButton):
+                        if child.cget("text") in ["Browse Files", "🗑 Clear Queue", "Remove Selected", "🎵 Song Distribution", "📤 Upload to Drive"]:
+                            child.configure(state="disabled")
+        
+        # Disable input fields
+        input_fields = [
+            self.output_entry,
+            self.music_entry, 
+            self.sheet_entry,
+            self.duration_input,
+            self.new_song_count_entry
+        ]
+        
+        for field in input_fields:
+            if hasattr(field, 'configure'):
+                field.configure(state="disabled")
+        
+        # Disable checkboxes
+        checkboxes = [
+            self.use_default_checkbox,
+            self.fade_audio_checkbox,
+            self.export_timestamp_checkbox,
+            self.auto_upload_checkbox
+        ]
+        
+        for checkbox in checkboxes:
+            if hasattr(checkbox, 'configure'):
+                checkbox.configure(state="disabled")
+        
+        # Disable dropdown
+        if hasattr(self, 'transition_dropdown'):
+            self.transition_dropdown.configure(state="disabled")
+        
+        # Update start/stop buttons
+        self.start_button.configure(state="disabled", text="🔄 Processing...")
+        self.stop_button.configure(state="normal")
+        
+        # Change window title to show processing status
+        original_title = self.title()
+        self.title(f"{original_title} - PROCESSING")
+        self._original_title = original_title
+        
+        # Show processing indicator in status
+        self.status_label.configure(text="🔄 Processing in progress - UI locked", text_color="#ffc107")
+
+    def unlock_ui_after_processing(self):
+        """Unlock UI elements after processing is complete"""
+        # Re-enable file management
+        self.drop_area.configure(state="normal")
+        
+        # Re-enable all buttons
+        for widget in self.winfo_children():
+            if hasattr(widget, 'winfo_children'):
+                for child in widget.winfo_children():
+                    if isinstance(child, ctk.CTkButton):
+                        if child.cget("text") in ["Browse Files", "🗑 Clear Queue", "Remove Selected", "🎵 Song Distribution", "📤 Upload to Drive"]:
+                            child.configure(state="normal")
+        
+        # Re-enable input fields
+        input_fields = [
+            self.output_entry,
+            self.music_entry,
+            self.sheet_entry, 
+            self.duration_input
+        ]
+        
+        for field in input_fields:
+            if hasattr(field, 'configure'):
+                field.configure(state="normal")
+        
+        # Re-enable checkboxes
+        checkboxes = [
+            self.use_default_checkbox,
+            self.fade_audio_checkbox,
+            self.export_timestamp_checkbox,
+            self.auto_upload_checkbox
+        ]
+        
+        for checkbox in checkboxes:
+            if hasattr(checkbox, 'configure'):
+                checkbox.configure(state="normal")
+        
+        # Re-enable dropdown
+        if hasattr(self, 'transition_dropdown'):
+            self.transition_dropdown.configure(state="normal")
+        
+        # Handle song count entry based on checkbox state
+        self.toggle_song_count()
+        
+        # Reset start/stop buttons
+        self.start_button.configure(state="normal", text="▶ Start Processing")
+        self.stop_button.configure(state="disabled")
+        
+        # Restore window title
+        if hasattr(self, '_original_title'):
+            self.title(self._original_title)
+            delattr(self, '_original_title')
+        
+        # Reset status
+        count = len(self.file_paths)
+        if count > 0:
+            self.status_label.configure(text=f"📄 {count} file{'s' if count > 1 else ''} queued", text_color="#00bfff")
+        else:
+            self.status_label.configure(text="Drag video files here", text_color="#00bfff")
 
     def validate_inputs(self):
         """Validate all required inputs"""
@@ -1111,12 +1260,17 @@ class BatchProcessorUI(TkinterDnD.Tk):
         self.current_file_var.set(f"Current file: {filename}")
 
     def processing_complete(self):
-        """Reset UI after processing is complete"""
+        """Reset UI after processing is complete - UPDATED"""
         self.rendering = False
         self.progress_var.set("Processing complete")
         self.current_file_var.set("")
-        self.start_button.configure(state="normal")
-        self.stop_button.configure(state="disabled")
+        
+        # Unlock the UI
+        self.unlock_ui_after_processing()
+        
+        # Clear distribution settings if they exist
+        if hasattr(self.controller, 'distribution_settings'):
+            self.controller.distribution_settings = None
         
         # Store a flag indicating processing is complete
         self.processing_finished = True
@@ -1146,11 +1300,14 @@ class BatchProcessorUI(TkinterDnD.Tk):
                 self.upload_finished = False
 
     def stop_processing(self):
-        """Stop all processing"""
+        """Stop all processing - UPDATED"""
         if not self.rendering:
             return
             
-        confirm = messagebox.askyesno("Confirm Stop", "Are you sure you want to stop processing?")
+        confirm = messagebox.askyesno("Confirm Stop", 
+                                    "Are you sure you want to stop processing?\n\n"
+                                    "This will interrupt the current render and may leave incomplete files.",
+                                    parent=self)
         if not confirm:
             return
             
@@ -1158,10 +1315,15 @@ class BatchProcessorUI(TkinterDnD.Tk):
         self.was_stopped = True
         self.controller.stop_processing()
                 
-        self.progress_var.set("Processing stopped")
+        self.progress_var.set("Processing stopped by user")
         self.current_file_var.set("")
-        self.start_button.configure(state="normal")
-        self.stop_button.configure(state="disabled")
+        
+        # Unlock the UI
+        self.unlock_ui_after_processing()
+        
+        # Clear distribution settings if they exist
+        if hasattr(self.controller, 'distribution_settings'):
+            self.controller.distribution_settings = None
         
     def clear_queue(self):
         """Clear the file queue with confirmation"""
@@ -1709,17 +1871,24 @@ class BatchProcessorUI(TkinterDnD.Tk):
             )
 
     def show_distribution_modal(self):
-        """Show the song pool distribution modal"""
+        """Show the song pool distribution modal - UPDATED"""
         if self.rendering:
-            messagebox.showwarning("Processing in Progress", "Cannot configure distribution while processing.")
+            messagebox.showwarning("Processing in Progress", "Cannot configure distribution while processing.", parent=self)
             return
         
         if not self.sheet_entry.get().strip():
-            messagebox.showwarning("No Sheet URL", "Please configure a Google Sheet URL first.")
+            messagebox.showwarning("No Sheet URL", "Please configure a Google Sheet URL first.", parent=self)
             return
         
+        if not self.file_paths:
+            messagebox.showwarning("No Files", "Please add some video files to the queue first.", parent=self)
+            return
+        
+        # Import here to avoid circular imports
+        from song_distribution_modal import SongPoolDistributionModal
+        
         modal = SongPoolDistributionModal(self, self.controller)
-        modal.wait_window()
+        modal.wait_window()  # This blocks until modal is closed
 
     def logout_user(self):
         """Handle user logout"""

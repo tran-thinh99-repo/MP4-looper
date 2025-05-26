@@ -1,9 +1,10 @@
 import tkinter as tk
+from tkinter import messagebox
 from utils import center_window
 from icon_helper import set_window_icon
 
 class SongPoolDistributionModal(tk.Toplevel):
-    """Modern Song Pool Distribution Modal with beautiful UI"""
+    """Compact Song Pool Distribution Modal - Better width utilization"""
     
     def __init__(self, parent, controller):
         super().__init__(parent)
@@ -28,11 +29,12 @@ class SongPoolDistributionModal(tk.Toplevel):
             'gradient_end': '#764ba2'     # Purple gradient end
         }
         
-        # Configure window
+        # Configure window - MUCH SMALLER AND WIDER
         self.configure(bg=self.colors['bg_primary'])
         self.title("🎵 Song Distribution Studio")
-        self.geometry("700x800")
+        self.geometry("900x600")  # Changed from 700x800 to 900x600 (wider, shorter)
         self.resizable(True, True)
+        self.minsize(800, 500)  # Set minimum size
         
         # Make modal
         self.transient(parent)
@@ -44,179 +46,172 @@ class SongPoolDistributionModal(tk.Toplevel):
         self.total_songs = 0
         self.song_distribution = []
         
-        # Create modern UI
-        self.create_modern_ui()
+        # Create compact UI
+        self.create_compact_ui()
         
         # Load data
         self.update_song_count()
         
         # Center window
-        center_window()
+        center_window(self)
     
-    def create_modern_ui(self):
-        """Create beautiful modern UI"""
-        # Main container with gradient effect
+    def create_compact_ui(self):
+        """Create compact UI using horizontal layout"""
+        # Main container
         self.main_frame = tk.Frame(self, bg=self.colors['bg_primary'])
-        self.main_frame.pack(fill="both", expand=True)
+        self.main_frame.pack(fill="both", expand=True, padx=15, pady=15)
         
-        # Create header section
-        self.create_header()
+        # TOP: Header (smaller)
+        self.create_compact_header()
         
-        # Create stats section
-        self.create_stats_section()
+        # MIDDLE: Two-column layout for settings and preview
+        self.create_main_content()
         
-        # Create settings section
-        self.create_settings_section()
-        
-        # Create preview section
-        self.create_preview_section()
-        
-        # Create action buttons
+        # BOTTOM: Action buttons
         self.create_action_buttons()
     
-    def create_header(self):
-        """Create modern header with gradient effect"""
-        header_frame = tk.Frame(self.main_frame, bg=self.colors['bg_primary'], height=120)
-        header_frame.pack(fill="x", padx=0, pady=0)
+    def create_compact_header(self):
+        """Create a more compact header"""
+        header_frame = tk.Frame(self.main_frame, bg=self.colors['bg_primary'], height=60)
+        header_frame.pack(fill="x", pady=(0, 15))
         header_frame.pack_propagate(False)
         
-        # Create gradient canvas
-        canvas = tk.Canvas(header_frame, height=120, highlightthickness=0)
-        canvas.pack(fill="x")
-        
-        # Draw gradient background
-        def draw_gradient():
-            width = canvas.winfo_width()
-            if width > 1:  # Only draw if canvas has been sized
-                # Clear canvas
-                canvas.delete("all")
-                
-                # Create gradient
-                for i in range(width):
-                    ratio = i / width
-                    # Interpolate between gradient colors
-                    color = self.interpolate_color(
-                        self.colors['gradient_start'], 
-                        self.colors['gradient_end'], 
-                        ratio
-                    )
-                    canvas.create_line(i, 0, i, 120, fill=color, width=1)
-                
-                # Add title text with shadow effect
-                # Shadow
-                canvas.create_text(
-                    width//2 + 2, 42, 
-                    text="🎵 Song Distribution Studio", 
-                    font=("Segoe UI", 24, "bold"),
-                    fill="#000000",
-                    anchor="center"
-                )
-                # Main text
-                canvas.create_text(
-                    width//2, 40, 
-                    text="🎵 Song Distribution Studio", 
-                    font=("Segoe UI", 24, "bold"),
-                    fill=self.colors['text_primary'],
-                    anchor="center"
-                )
-                
-                # Subtitle
-                canvas.create_text(
-                    width//2, 70, 
-                    text="Create unique song combinations for each video", 
-                    font=("Segoe UI", 12),
-                    fill=self.colors['text_secondary'],
-                    anchor="center"
-                )
-        
-        # Bind to configure event to redraw gradient when window resizes
-        canvas.bind('<Configure>', lambda e: draw_gradient())
-        
-        # Initial draw after a short delay
-        self.after(10, draw_gradient)
-    
-    def create_stats_section(self):
-        """Create modern stats cards"""
-        stats_frame = tk.Frame(self.main_frame, bg=self.colors['bg_primary'])
-        stats_frame.pack(fill="x", padx=30, pady=20)
-        
-        # Songs info card
-        self.songs_card = self.create_info_card(
-            stats_frame, 
-            "📊", 
-            "Total Songs Available", 
-            "Loading...",
-            self.colors['success']
-        )
-        self.songs_card.pack(fill="x")
-    
-    def create_settings_section(self):
-        """Create modern settings section"""
-        settings_container = tk.Frame(self.main_frame, bg=self.colors['bg_primary'])
-        settings_container.pack(fill="x", padx=30, pady=(0, 20))
-        
-        # Settings card
-        settings_card = self.create_card(settings_container)
-        settings_card.pack(fill="x")
-        
-        # Card header
-        header_frame = tk.Frame(settings_card, bg=self.colors['bg_card'])
-        header_frame.pack(fill="x", padx=20, pady=(20, 10))
+        # Title and subtitle in one line
+        title_frame = tk.Frame(header_frame, bg=self.colors['bg_primary'])
+        title_frame.pack(expand=True)
         
         title_label = tk.Label(
-            header_frame,
-            text="⚙️ Distribution Settings",
+            title_frame,
+            text="🎵 Song Distribution Studio",
+            font=("Segoe UI", 20, "bold"),
+            fg=self.colors['text_primary'],
+            bg=self.colors['bg_primary']
+        )
+        title_label.pack()
+        
+        subtitle_label = tk.Label(
+            title_frame,
+            text="Create unique song combinations for each video",
+            font=("Segoe UI", 11),
+            fg=self.colors['text_secondary'],
+            bg=self.colors['bg_primary']
+        )
+        subtitle_label.pack()
+    
+    def create_main_content(self):
+        """Create main content in two-column layout"""
+        content_frame = tk.Frame(self.main_frame, bg=self.colors['bg_primary'])
+        content_frame.pack(fill="both", expand=True, pady=(0, 15))
+        
+        # Configure columns: Left 40%, Right 60%
+        content_frame.grid_columnconfigure(0, weight=2)  # Settings column
+        content_frame.grid_columnconfigure(1, weight=3)  # Preview column
+        content_frame.grid_rowconfigure(0, weight=1)
+        
+        # LEFT COLUMN: Settings
+        self.create_settings_column(content_frame)
+        
+        # RIGHT COLUMN: Preview
+        self.create_preview_column(content_frame)
+    
+    def create_settings_column(self, parent):
+        """Create the left settings column"""
+        settings_frame = tk.Frame(parent, bg=self.colors['bg_card'])
+        settings_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        
+        # Settings header
+        settings_header = tk.Label(
+            settings_frame,
+            text="⚙️ Settings",
             font=("Segoe UI", 16, "bold"),
             fg=self.colors['text_primary'],
             bg=self.colors['bg_card']
         )
+        settings_header.pack(pady=(15, 10))
+        
+        # Stats card (compact)
+        self.create_compact_stats(settings_frame)
+        
+        # Number of videos section
+        self.create_video_count_section(settings_frame)
+        
+        # Distribution method section
+        self.create_distribution_method_section(settings_frame)
+        
+        # Calculation display (compact)
+        self.create_compact_calculation_display(settings_frame)
+    
+    def create_compact_stats(self, parent):
+        """Create compact stats display"""
+        stats_frame = tk.Frame(parent, bg=self.colors['bg_secondary'])
+        stats_frame.pack(fill="x", padx=15, pady=(0, 15))
+        
+        stats_content = tk.Frame(stats_frame, bg=self.colors['bg_secondary'])
+        stats_content.pack(padx=10, pady=10)
+        
+        # Icon and text in one line
+        icon_label = tk.Label(
+            stats_content,
+            text="📊",
+            font=("Segoe UI", 16),
+            fg=self.colors['success'],
+            bg=self.colors['bg_secondary']
+        )
+        icon_label.pack(side="left", padx=(0, 8))
+        
+        text_frame = tk.Frame(stats_content, bg=self.colors['bg_secondary'])
+        text_frame.pack(side="left")
+        
+        title_label = tk.Label(
+            text_frame,
+            text="Total Songs Available",
+            font=("Segoe UI", 11, "bold"),
+            fg=self.colors['text_primary'],
+            bg=self.colors['bg_secondary']
+        )
         title_label.pack(anchor="w")
         
-        # Settings content
-        content_frame = tk.Frame(settings_card, bg=self.colors['bg_card'])
-        content_frame.pack(fill="x", padx=20, pady=(0, 20))
-        
-        # Number of videos
-        self.create_video_count_section(content_frame)
-        
-        # Distribution method
-        self.create_distribution_method_section(content_frame)
-        
-        # Stats display
-        self.create_calculation_display(content_frame)
+        self.songs_value_label = tk.Label(
+            text_frame,
+            text="Loading...",
+            font=("Segoe UI", 14, "bold"),
+            fg=self.colors['success'],
+            bg=self.colors['bg_secondary']
+        )
+        self.songs_value_label.pack(anchor="w")
     
     def create_video_count_section(self, parent):
-        """Create video count selection with modern slider"""
+        """Create compact video count section"""
         section_frame = tk.Frame(parent, bg=self.colors['bg_card'])
-        section_frame.pack(fill="x", pady=(0, 20))
+        section_frame.pack(fill="x", padx=15, pady=(0, 15))
         
-        # Label
-        label = tk.Label(
+        # Title
+        title_label = tk.Label(
             section_frame,
             text="Number of Videos",
             font=("Segoe UI", 12, "bold"),
             fg=self.colors['text_primary'],
             bg=self.colors['bg_card']
         )
-        label.pack(anchor="w", pady=(0, 10))
+        title_label.pack(anchor="w", pady=(0, 8))
         
-        # Slider container
-        slider_frame = tk.Frame(section_frame, bg=self.colors['bg_card'])
-        slider_frame.pack(fill="x")
+        # Horizontal layout for count and slider
+        count_frame = tk.Frame(section_frame, bg=self.colors['bg_card'])
+        count_frame.pack(fill="x")
         
-        # Value display
+        # Large number display
         self.video_count_display = tk.Label(
-            slider_frame,
+            count_frame,
             text="7",
-            font=("Segoe UI", 20, "bold"),
+            font=("Segoe UI", 24, "bold"),
             fg=self.colors['accent'],
             bg=self.colors['bg_card']
         )
-        self.video_count_display.pack(side="left", padx=(0, 20))
+        self.video_count_display.pack(side="left", padx=(0, 15))
         
         # Slider
         self.video_slider = tk.Scale(
-            slider_frame,
+            count_frame,
             from_=2, to=30,
             orient="horizontal",
             variable=self.num_videos_var,
@@ -227,27 +222,27 @@ class SongPoolDistributionModal(tk.Toplevel):
             highlightthickness=0,
             troughcolor=self.colors['bg_secondary'],
             sliderrelief="flat",
-            length=300,
-            font=("Segoe UI", 10)
+            length=180,
+            font=("Segoe UI", 9)
         )
         self.video_slider.pack(side="left", fill="x", expand=True)
     
     def create_distribution_method_section(self, parent):
-        """Create distribution method selection with modern buttons"""
+        """Create compact distribution method section"""
         section_frame = tk.Frame(parent, bg=self.colors['bg_card'])
-        section_frame.pack(fill="x", pady=(0, 20))
+        section_frame.pack(fill="x", padx=15, pady=(0, 15))
         
-        # Label
-        label = tk.Label(
+        # Title
+        title_label = tk.Label(
             section_frame,
             text="Distribution Method",
             font=("Segoe UI", 12, "bold"),
             fg=self.colors['text_primary'],
             bg=self.colors['bg_card']
         )
-        label.pack(anchor="w", pady=(0, 10))
+        title_label.pack(anchor="w", pady=(0, 8))
         
-        # Button container
+        # Horizontal button layout
         button_frame = tk.Frame(section_frame, bg=self.colors['bg_card'])
         button_frame.pack(fill="x")
         
@@ -255,73 +250,64 @@ class SongPoolDistributionModal(tk.Toplevel):
         self.sequential_btn = self.create_toggle_button(
             button_frame, "📊 Sequential", "sequential", True
         )
-        self.sequential_btn.pack(side="left", padx=(0, 10))
+        self.sequential_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
         
         # Random button
         self.random_btn = self.create_toggle_button(
             button_frame, "🎲 Random", "random", False
         )
-        self.random_btn.pack(side="left")
+        self.random_btn.pack(side="left", fill="x", expand=True, padx=(5, 0))
     
-    def create_calculation_display(self, parent):
-        """Create calculation display section"""
+    def create_compact_calculation_display(self, parent):
+        """Create compact calculation display"""
         calc_frame = tk.Frame(parent, bg=self.colors['bg_secondary'])
-        calc_frame.pack(fill="x", pady=(10, 0))
-        calc_frame.configure(relief="solid", bd=1)
+        calc_frame.pack(fill="x", padx=15, pady=(0, 15))
         
-        # Padding frame
-        padded_frame = tk.Frame(calc_frame, bg=self.colors['bg_secondary'])
-        padded_frame.pack(fill="x", padx=15, pady=15)
+        calc_content = tk.Frame(calc_frame, bg=self.colors['bg_secondary'])
+        calc_content.pack(padx=10, pady=8)
         
         # Songs per video
         self.songs_per_video_label = tk.Label(
-            padded_frame,
+            calc_content,
             text="Songs per video: ~0 (auto-calculated)",
-            font=("Segoe UI", 11),
+            font=("Segoe UI", 10),
             fg=self.colors['text_secondary'],
             bg=self.colors['bg_secondary']
         )
-        self.songs_per_video_label.pack(anchor="w", pady=(0, 5))
+        self.songs_per_video_label.pack(anchor="w", pady=(0, 3))
         
         # Loops needed
         self.loops_info_label = tk.Label(
-            padded_frame,
+            calc_content,
             text="Loops needed: ~0x to fill duration",
-            font=("Segoe UI", 11),
+            font=("Segoe UI", 10),
             fg=self.colors['text_secondary'],
             bg=self.colors['bg_secondary']
         )
         self.loops_info_label.pack(anchor="w")
     
-    def create_preview_section(self):
-        """Create modern preview section"""
-        preview_container = tk.Frame(self.main_frame, bg=self.colors['bg_primary'])
-        preview_container.pack(fill="both", expand=True, padx=30, pady=(0, 20))
+    def create_preview_column(self, parent):
+        """Create the right preview column"""
+        preview_frame = tk.Frame(parent, bg=self.colors['bg_card'])
+        preview_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         
-        # Preview card
-        preview_card = self.create_card(preview_container)
-        preview_card.pack(fill="both", expand=True)
-        
-        # Header
-        header_frame = tk.Frame(preview_card, bg=self.colors['bg_card'])
-        header_frame.pack(fill="x", padx=20, pady=(20, 10))
-        
-        title_label = tk.Label(
-            header_frame,
+        # Preview header
+        preview_header = tk.Label(
+            preview_frame,
             text="📋 Distribution Preview",
             font=("Segoe UI", 16, "bold"),
             fg=self.colors['text_primary'],
             bg=self.colors['bg_card']
         )
-        title_label.pack(anchor="w")
+        preview_header.pack(pady=(15, 10))
         
         # Scrollable preview area
-        preview_scroll_frame = tk.Frame(preview_card, bg=self.colors['bg_card'])
-        preview_scroll_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        preview_scroll_frame = tk.Frame(preview_frame, bg=self.colors['bg_card'])
+        preview_scroll_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
         
-        # Canvas and scrollbar for custom scrolling
+        # Canvas and scrollbar
         canvas = tk.Canvas(
-            preview_scroll_frame, 
+            preview_scroll_frame,
             bg=self.colors['bg_secondary'],
             highlightthickness=0
         )
@@ -340,86 +326,35 @@ class SongPoolDistributionModal(tk.Toplevel):
         scrollbar.pack(side="right", fill="y")
     
     def create_action_buttons(self):
-        """Create modern action buttons"""
-        button_container = tk.Frame(self.main_frame, bg=self.colors['bg_primary'])
-        button_container.pack(fill="x", padx=30, pady=(0, 30))
+        """Create compact action buttons"""
+        button_frame = tk.Frame(self.main_frame, bg=self.colors['bg_primary'])
+        button_frame.pack(fill="x")
+        
+        # Horizontal layout for buttons
+        buttons_container = tk.Frame(button_frame, bg=self.colors['bg_primary'])
+        buttons_container.pack()
         
         # Start button
         self.start_button = self.create_action_button(
-            button_container,
+            buttons_container,
             "▶ Start Processing",
             self.start_processing,
             self.colors['success'],
             "#00b894"
         )
-        self.start_button.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.start_button.pack(side="left", padx=(0, 10))
         
         # Cancel button
         cancel_button = self.create_action_button(
-            button_container,
+            buttons_container,
             "✕ Cancel",
             self.cancel,
             self.colors['bg_secondary'],
             "#636e72"
         )
-        cancel_button.pack(side="left", fill="x", expand=True, padx=(10, 0))
+        cancel_button.pack(side="left", padx=(10, 0))
     
-    # Helper methods for creating UI components
-    def create_card(self, parent):
-        """Create a modern card container"""
-        card = tk.Frame(
-            parent, 
-            bg=self.colors['bg_card'],
-            relief="solid",
-            bd=1
-        )
-        return card
-    
-    def create_info_card(self, parent, icon, title, value, accent_color):
-        """Create an info card with icon and stats"""
-        card = self.create_card(parent)
-        
-        # Content frame
-        content = tk.Frame(card, bg=self.colors['bg_card'])
-        content.pack(fill="x", padx=20, pady=20)
-        
-        # Icon and title
-        header_frame = tk.Frame(content, bg=self.colors['bg_card'])
-        header_frame.pack(fill="x", pady=(0, 10))
-        
-        icon_label = tk.Label(
-            header_frame,
-            text=icon,
-            font=("Segoe UI", 20),
-            fg=accent_color,
-            bg=self.colors['bg_card']
-        )
-        icon_label.pack(side="left", padx=(0, 10))
-        
-        title_label = tk.Label(
-            header_frame,
-            text=title,
-            font=("Segoe UI", 12, "bold"),
-            fg=self.colors['text_primary'],
-            bg=self.colors['bg_card']
-        )
-        title_label.pack(side="left", anchor="w")
-        
-        # Value
-        value_label = tk.Label(
-            content,
-            text=value,
-            font=("Segoe UI", 16, "bold"),
-            fg=accent_color,
-            bg=self.colors['bg_card']
-        )
-        value_label.pack(anchor="w")
-        
-        # Store reference to value label
-        card.value_label = value_label
-        
-        return card
-    
+    # Keep all the existing helper methods (create_toggle_button, create_action_button, etc.)
     def create_toggle_button(self, parent, text, value, is_selected):
         """Create a modern toggle button"""
         def on_click():
@@ -440,11 +375,11 @@ class SongPoolDistributionModal(tk.Toplevel):
             command=on_click,
             bg=bg_color,
             fg=fg_color,
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 10, "bold"),
             relief="flat",
             bd=0,
-            padx=20,
-            pady=10,
+            padx=15,
+            pady=8,
             cursor="hand2"
         )
         
@@ -473,8 +408,8 @@ class SongPoolDistributionModal(tk.Toplevel):
             font=("Segoe UI", 12, "bold"),
             relief="flat",
             bd=0,
-            padx=20,
-            pady=15,
+            padx=25,
+            pady=12,
             cursor="hand2"
         )
         
@@ -490,20 +425,7 @@ class SongPoolDistributionModal(tk.Toplevel):
         
         return button
     
-    def interpolate_color(self, color1, color2, ratio):
-        """Interpolate between two hex colors"""
-        # Remove # and convert to RGB
-        r1, g1, b1 = int(color1[1:3], 16), int(color1[3:5], 16), int(color1[5:7], 16)
-        r2, g2, b2 = int(color2[1:3], 16), int(color2[3:5], 16), int(color2[5:7], 16)
-        
-        # Interpolate
-        r = int(r1 + (r2 - r1) * ratio)
-        g = int(g1 + (g2 - g1) * ratio)
-        b = int(b1 + (b2 - b1) * ratio)
-        
-        return f"#{r:02x}{g:02x}{b:02x}"
-    
-    # Event handlers (keeping the original functionality)
+    # Keep all existing event handlers and methods
     def on_video_count_changed(self, value):
         """Handle video count change"""
         self.video_count_display.configure(text=value)
@@ -539,10 +461,10 @@ class SongPoolDistributionModal(tk.Toplevel):
             )
     
     def update_song_count(self):
-        """Update the total song count (simplified for demo)"""
-        # This would normally connect to your actual song counting logic
-        self.total_songs = 302  # Example value
-        self.songs_card.value_label.configure(
+        """Update the total song count"""
+        # Example value - replace with actual logic
+        self.total_songs = 302
+        self.songs_value_label.configure(
             text=f"{self.total_songs} songs from current sheet"
         )
         self.update_calculations()
@@ -560,7 +482,7 @@ class SongPoolDistributionModal(tk.Toplevel):
             text=f"Songs per video: ~{songs_per_video} (auto-calculated)"
         )
         
-        # Calculate loops (example)
+        # Calculate loops
         duration_seconds = 3600  # 1 hour example
         avg_song_duration = 240  # 4 minutes
         duration_per_chunk = songs_per_video * avg_song_duration
@@ -581,90 +503,113 @@ class SongPoolDistributionModal(tk.Toplevel):
         
         num_videos = int(self.num_videos_var.get())
         
-        # Create preview items
-        for i in range(num_videos):
-            self.create_preview_item(i + 1)
+        # Create compact preview items
+        for i in range(min(num_videos, 10)):  # Show max 10 for performance
+            self.create_compact_preview_item(i + 1)
     
-    def create_preview_item(self, video_num):
-        """Create a modern preview item"""
+    def create_compact_preview_item(self, video_num):
+        """Create a compact preview item"""
         # Calculate distribution for this video
         songs_per_video = self.total_songs // int(self.num_videos_var.get())
         start_song = (video_num - 1) * songs_per_video + 1
         end_song = start_song + songs_per_video - 1
         
-        # Item container
+        # Compact item container
         item_frame = tk.Frame(
-            self.preview_frame, 
+            self.preview_frame,
             bg=self.colors['bg_card'],
             relief="solid",
             bd=1
         )
-        item_frame.pack(fill="x", padx=10, pady=5)
+        item_frame.pack(fill="x", padx=8, pady=3)
         
-        # Content
+        # Single row layout
         content_frame = tk.Frame(item_frame, bg=self.colors['bg_card'])
-        content_frame.pack(fill="x", padx=15, pady=15)
+        content_frame.pack(fill="x", padx=10, pady=8)
         
-        # Video header
-        header_frame = tk.Frame(content_frame, bg=self.colors['bg_card'])
-        header_frame.pack(fill="x", pady=(0, 10))
+        # Video icon and number (left)
+        video_info = tk.Frame(content_frame, bg=self.colors['bg_card'])
+        video_info.pack(side="left")
         
         video_icon = tk.Label(
-            header_frame,
+            video_info,
             text="🎬",
-            font=("Segoe UI", 16),
+            font=("Segoe UI", 14),
             fg=self.colors['accent'],
             bg=self.colors['bg_card']
         )
-        video_icon.pack(side="left", padx=(0, 10))
+        video_icon.pack(side="left", padx=(0, 8))
         
         video_label = tk.Label(
-            header_frame,
+            video_info,
             text=f"Video {video_num}",
-            font=("Segoe UI", 14, "bold"),
+            font=("Segoe UI", 12, "bold"),
             fg=self.colors['text_primary'],
             bg=self.colors['bg_card']
         )
         video_label.pack(side="left")
         
-        # Song range
+        # Song range (right)
         range_label = tk.Label(
             content_frame,
             text=f"Songs {start_song}-{end_song} ({songs_per_video} songs)",
-            font=("Segoe UI", 11),
+            font=("Segoe UI", 10),
             fg=self.colors['text_secondary'],
             bg=self.colors['bg_card']
         )
-        range_label.pack(anchor="w")
-        
-        # Progress bar visualization
-        progress_frame = tk.Frame(content_frame, bg=self.colors['bg_card'])
-        progress_frame.pack(fill="x", pady=(10, 0))
-        
-        # Create visual progress bar
-        progress_bg = tk.Frame(
-            progress_frame, 
-            bg=self.colors['bg_secondary'], 
-            height=8
-        )
-        progress_bg.pack(fill="x")
-        
-        # Fill based on song count
-        max_songs = self.total_songs // int(self.num_videos_var.get()) + 10
-        fill_ratio = min(1.0, songs_per_video / max_songs)
-        
-        progress_fill = tk.Frame(
-            progress_bg, 
-            bg=self.colors['success'], 
-            height=8
-        )
-        progress_fill.place(x=0, y=0, relwidth=fill_ratio, height=8)
+        range_label.pack(side="right")
     
     def start_processing(self):
-        """Start processing - placeholder"""
-        # This would connect to your actual processing logic
-        print("Starting processing with distribution mode...")
-        self.destroy()
+        """Start processing with distribution mode"""
+        try:
+            # Validate inputs first
+            if self.total_songs == 0:
+                tk.messagebox.showerror("No Songs", "No songs available for distribution. Please check your Google Sheet URL.", parent=self)
+                return
+                
+            num_videos = int(self.num_videos_var.get())
+            if num_videos < 2:
+                tk.messagebox.showerror("Invalid Count", "Number of videos must be at least 2.", parent=self)
+                return
+            
+            # Create distribution settings
+            distribution_settings = {
+                'enabled': True,
+                'num_videos': num_videos,
+                'distribution_method': self.distribution_method_var.get(),
+                'song_distribution': self.calculate_song_ranges()
+            }
+            
+            # Store distribution settings in the controller
+            self.controller.distribution_settings = distribution_settings
+            
+            # Close the modal
+            self.destroy()
+            
+            # Start processing on the main UI
+            # This will trigger the distributed processing mode
+            self.parent.start_processing()
+            
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"Failed to start processing:\n{str(e)}", parent=self)
+    
+    def calculate_song_ranges(self):
+        """Calculate song ranges for each video"""
+        num_videos = int(self.num_videos_var.get())
+        songs_per_video = self.total_songs // num_videos
+        
+        song_ranges = []
+        for i in range(num_videos):
+            start_idx = i * songs_per_video + 1
+            end_idx = start_idx + songs_per_video - 1
+            
+            # For the last video, include any remaining songs
+            if i == num_videos - 1:
+                end_idx = self.total_songs
+                
+            song_ranges.append((start_idx, end_idx, songs_per_video))
+        
+        return song_ranges
     
     def cancel(self):
         """Cancel and close"""
