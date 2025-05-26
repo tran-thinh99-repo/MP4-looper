@@ -107,6 +107,32 @@ Create multiple videos with different song selections:
 4. **Preview**: See exactly which songs each video will use
 5. **Start Processing**: Creates multiple unique videos
 
+### Video Transitions 🎬
+
+The MP4 Looper now supports professional video transitions that are applied at the beginning and end of your videos:
+
+**Available Transitions:**
+- **None** - No transition (default)
+- **Fade** - Smooth fade in/out effect
+- **Slide Left/Right** - Video slides in from left or right
+- **Zoom** - Zooms in at start, zooms out at end
+- **Wipe Down/Up** - Video reveals from top or bottom
+- **Blinds** - Horizontal blind effect
+- **Pixelate** - Pixelates then reveals the video
+- **Dissolve** - Random pixel dissolve effect
+- **Expand Line** - Expands from center line
+
+**Important Notes:**
+- Transitions require NVIDIA GPU with NVENC support
+- Each transition adds ~1.5 seconds to the start and end
+- If GPU encoding is not available, processing continues without transitions
+- Transitions work with all video durations (1h, 3h, 11h)
+
+**How to use:**
+1. Select your desired transition from the dropdown menu
+2. The transition will be applied to all videos in the batch
+3. Monitor the progress - you'll see "Applying [transition] transition..." during processing
+
 ### Utilities Window
 Click the 🔧 button to access additional tools:
 
@@ -228,4 +254,4 @@ After processing, you'll find these files in your output folder:
 
 **Need more help?** Use the "Send Debug Info" feature to contact support with detailed information about any issues you're experiencing.
 
-**Version**: 1.2.0 | **Last Updated**: December 2024
+**Version**: 1.2.1 | **Last Updated**: May 2025

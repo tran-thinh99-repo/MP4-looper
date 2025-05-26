@@ -133,8 +133,6 @@ class SettingsManager:
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
             
-            logging.debug(f"Settings saved to: {self.settings_file}")
-            
         except Exception as e:
             logging.error(f"Error saving settings: {e}")
     
@@ -166,8 +164,6 @@ class SettingsManager:
         
         if save:
             self._save_settings()
-        
-        logging.debug(f"Setting updated: {key_path} = {value}")
     
     def update_section(self, section: str, updates: Dict[str, Any], save: bool = True):
         """Update multiple settings in a section"""

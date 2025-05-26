@@ -107,6 +107,32 @@ Tạo nhiều video với các lựa chọn bài hát khác nhau:
 4. **Xem trước**: Xem chính xác bài hát nào mỗi video sẽ sử dụng
 5. **Bắt Đầu Xử Lý**: Tạo nhiều video độc đáo
 
+### Hiệu Ứng Chuyển Cảnh Video 🎬
+
+MP4 Looper giờ đây hỗ trợ các hiệu ứng chuyển cảnh chuyên nghiệp ở đầu và cuối video:
+
+**Các Hiệu Ứng Có Sẵn:**
+- **None** - Không có hiệu ứng (mặc định)
+- **Fade** - Hiệu ứng mờ dần vào/ra
+- **Slide Left/Right** - Video trượt từ trái hoặc phải
+- **Zoom** - Phóng to khi bắt đầu, thu nhỏ khi kết thúc
+- **Wipe Down/Up** - Video hiện dần từ trên xuống hoặc dưới lên
+- **Blinds** - Hiệu ứng rèm ngang
+- **Pixelate** - Làm mờ pixel rồi hiện rõ dần
+- **Dissolve** - Hiệu ứng tan biến ngẫu nhiên
+- **Expand Line** - Mở rộng từ đường trung tâm
+
+**Lưu Ý Quan Trọng:**
+- Cần có GPU NVIDIA với hỗ trợ NVENC
+- Mỗi hiệu ứng thêm ~1.5 giây vào đầu và cuối video
+- Nếu không có GPU, video vẫn xử lý bình thường nhưng không có hiệu ứng
+- Hiệu ứng hoạt động với mọi thời lượng video (1h, 3h, 11h)
+
+**Cách sử dụng:**
+1. Chọn hiệu ứng mong muốn từ menu thả xuống
+2. Hiệu ứng sẽ áp dụng cho tất cả video trong hàng đợi
+3. Theo dõi tiến trình - bạn sẽ thấy "Applying [tên hiệu ứng] transition..." khi xử lý
+
 ### Cửa Sổ Tiện Ích
 Click nút 🔧 để truy cập các công cụ bổ sung:
 
@@ -228,4 +254,4 @@ Sau khi xử lý, bạn sẽ tìm thấy các file này trong thư mục đầu 
 
 **Cần thêm trợ giúp?** Sử dụng tính năng "Send Debug Info" để liên hệ hỗ trợ với thông tin chi tiết về bất kỳ vấn đề nào bạn đang gặp phải.
 
-**Phiên bản**: 1.2.0 | **Cập nhật lần cuối**: Tháng 12 2024
+**Phiên bản**:  1.2.1 | **Cập nhật lần cuối**: Tháng 5 2025

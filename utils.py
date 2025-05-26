@@ -63,22 +63,6 @@ class ToolTip(object):
         if tw:
             tw.destroy()
 
-def safe_operation(operation_name):
-    """Decorator for common error handling pattern"""
-    from functools import wraps
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                result = func(*args, **kwargs)
-                logging.debug(f"{operation_name} completed successfully")
-                return result
-            except Exception as e:
-                logging.error(f"{operation_name} failed: {e}")
-                return None
-        return wrapper
-    return decorator
-
 def update_total_duration(tree, label):
         """Calculates and updates total duration displayed in a Treeview widget."""
         total_seconds = 0
@@ -92,24 +76,6 @@ def update_total_duration(tree, label):
         hrs, mins = divmod(total_seconds, 3600)
         mins, secs = divmod(mins, 60)
         label.config(text=f"Total Duration: {hrs}h {mins}m {secs}s")
-
-def log_utils_loaded():
-    logging.debug(f"✅ {os.path.basename(__file__)} loaded successfully")
-
-def get_gpu_usage(label=""):
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True
-        )
-        output = result.stdout.strip()
-        if output:
-            gpu_usage, mem_used, mem_total = map(int, output.split(","))
-            return f"🖥 GPU ({label}): {gpu_usage}% | Memory: {mem_used} / {mem_total} MiB"
-        else:
-            return f"🖥 GPU ({label}): no output"
-    except Exception as e:
-        return f"🖥 GPU ({label}): error - {e}"
 
 def toggle_new_song_input(entry_widget, checkbox_var):
     if checkbox_var.get():
@@ -339,19 +305,6 @@ def disable_cmd_edit_mode():
     new_mode = mode.value & ~0x0040
     kernel32.SetConsoleMode(h_stdin, new_mode)
 
-def extract_base_names(folder):
-    base_names = set()
-
-    for fname in os.listdir(folder):
-        name_without_ext = os.path.splitext(fname)[0]
-        match = re.match(r"^(\d+_[^_]+)", name_without_ext)
-        if match:
-            base_names.add(match.group(1))
-
-    print("🔍 Detected base names in folder:")
-    for name in sorted(base_names):
-        print(f" - {name}")
-
 def center_window(window, parent=None, offset_y=0):
     """
     Center a window on screen or relative to parent window.
@@ -441,124 +394,6 @@ def _do_center_window(window, parent=None, offset_y=0):
         except:
             pass  # Give up gracefully
 
-def diagnose_file_locks(file_path):
-    """Check if a file is locked and try to identify processes holding locks"""
-    import os
-    import subprocess
-    import tempfile
-    
-    # Create a diagnostic log file
-    log_path = os.path.join(tempfile.gettempdir(), "file_lock_diagnosis.txt")
-    
-    try:
-        with open(log_path, "w") as f:
-            f.write(f"File lock diagnosis for: {file_path}\n")
-            f.write(f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-            
-            # Check if file exists
-            f.write(f"File exists: {os.path.exists(file_path)}\n")
-            
-            # Try to open the file for writing
-            try:
-                with open(file_path, "a+b") as test_f:
-                    f.write("File can be opened for writing\n")
-            except Exception as e:
-                f.write(f"File cannot be opened for writing: {e}\n")
-            
-            # On Windows, use handle.exe or OpenedFilesView if available
-            if os.name == 'nt':
-                f.write("\nAttempting to identify processes with open handles...\n")
-                
-                # Try Process Explorer output (if available)
-                try:
-                    result = subprocess.run(
-                        ['handle', file_path], 
-                        capture_output=True, 
-                        text=True,
-                        timeout=5
-                    )
-                    f.write("Handle.exe output:\n")
-                    f.write(result.stdout)
-                    f.write(result.stderr)
-                except:
-                    f.write("Handle.exe not available or failed\n")
-                
-                # List running processes that might be relevant
-                f.write("\nRunning processes that might be relevant:\n")
-                try:
-                    result = subprocess.run(
-                        ['tasklist', '/FI', f'IMAGENAME eq {os.path.basename(file_path)}'], 
-                        capture_output=True, 
-                        text=True,
-                        timeout=5
-                    )
-                    f.write(result.stdout)
-                except:
-                    f.write("Failed to list processes\n")
-        
-        return log_path
-    except Exception as e:
-        logging.error(f"Error in file lock diagnosis: {e}")
-        return None
-
-def create_update_diagnostic_report(update_file, target_file):
-    """Create a comprehensive diagnostic report for update issues"""
-    import os
-    import sys
-    import platform
-    import time
-    import tempfile
-    
-    report_path = os.path.join(tempfile.gettempdir(), "update_diagnostic.txt")
-    
-    try:
-        with open(report_path, "w") as f:
-            f.write("=== MP4 Looper Update Diagnostic Report ===\n")
-            f.write(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-            
-            # System information
-            f.write("=== System Information ===\n")
-            f.write(f"OS: {platform.system()} {platform.version()} {platform.architecture()[0]}\n")
-            f.write(f"Python: {sys.version}\n")
-            f.write(f"Executable: {sys.executable}\n")
-            f.write(f"Working directory: {os.getcwd()}\n\n")
-            
-            # Update file information
-            f.write("=== Update File Information ===\n")
-            f.write(f"Update file: {update_file}\n")
-            if os.path.exists(update_file):
-                f.write(f"  Size: {os.path.getsize(update_file)} bytes\n")
-                f.write(f"  Last modified: {time.ctime(os.path.getmtime(update_file))}\n")
-                f.write(f"  Readable: {os.access(update_file, os.R_OK)}\n")
-                f.write(f"  Writable: {os.access(update_file, os.W_OK)}\n")
-            else:
-                f.write("  File does not exist!\n")
-            f.write("\n")
-            
-            # Target file information
-            f.write("=== Target File Information ===\n")
-            f.write(f"Target file: {target_file}\n")
-            if os.path.exists(target_file):
-                f.write(f"  Size: {os.path.getsize(target_file)} bytes\n")
-                f.write(f"  Last modified: {time.ctime(os.path.getmtime(target_file))}\n")
-                f.write(f"  Readable: {os.access(target_file, os.R_OK)}\n")
-                f.write(f"  Writable: {os.access(target_file, os.W_OK)}\n")
-                
-                # Try to determine if file is locked
-                f.write("  Checking if file is locked...\n")
-                try:
-                    with open(target_file, "a+b") as test_f:
-                        f.write("  File is not locked for writing\n")
-                except Exception as e:
-                    f.write(f"  File appears to be locked: {e}\n")
-            else:
-                f.write("  File does not exist!\n")
-        
-        return report_path
-    except Exception as e:
-        logging.error(f"Error creating diagnostic report: {e}")
-        return None
-    
 def is_running_in_debug_mode():
     """Check if we're running in debug/development mode"""
     return 'debugpy' in sys.modules or any('debug' in arg.lower() for arg in sys.argv)

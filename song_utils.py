@@ -16,41 +16,6 @@ from api_monitor_module.utils.monitor_access import track_api_call_simple
 
 logging.debug(f"✅ {os.path.basename(__file__)} loaded successfully")
 
-def validate_csv_rows(csv_lines):
-    """Shared logic for both online and offline sources."""
-    import csv
-    mismatches = []
-    reader = csv.reader(csv_lines)
-    next(reader, None)  # skip header
-
-    for row in reader:
-        if len(row) < 3:
-            continue
-        a = row[0].strip()
-        b = row[1].strip()
-        c = row[2].strip()
-        if not b:
-            continue
-        expected = f"{a}_{b}".strip()
-        if c != expected:
-            mismatches.append((a, b, c, expected))
-    return mismatches
-
-def validate_online_sheet(sheet_url):
-    logging.info(f"🌐 Fetching Google Sheet for validation: {sheet_url}")
-    try:
-        response = requests.get(sheet_url)
-        if response.status_code != 200:
-            logging.error(f"❌ Failed to fetch online sheet: HTTP {response.status_code}")
-            return None
-
-        lines = response.text.splitlines()
-        mismatches = validate_csv_rows(lines)
-        return mismatches
-    except Exception as e:
-        logging.error(f"❌ Exception validating sheet: {e}")
-        return None
-    
 class SongListGenerator:
     """Optimized song list generator for batch processing"""
     

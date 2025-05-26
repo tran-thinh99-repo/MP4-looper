@@ -201,7 +201,11 @@ python mp4_looper.py
 
 ## 📝 Version History
 
-### v1.2.0 (Current)
+### v1.2.1 (Current)
+
+- Added transitions
+
+### v1.2.0
 - Added song distribution mode for multiple video variants
 - Improved hardware acceleration support
 - Enhanced error handling and recovery
@@ -284,3 +288,17 @@ This project is proprietary software. All rights reserved.
 **MP4 Looper** - Professional video processing made simple.
 
 *For the latest updates and information, check the application's built-in update system.*
+
+### 🎬 Professional Video Transitions (NEW!)
+
+MP4 Looper now includes 10 professional video transitions to enhance your video loops:
+
+- **Smooth transitions**: Fade, Dissolve, Pixelate effects
+- **Directional transitions**: Slide (left/right), Wipe (up/down)
+- **Dynamic transitions**: Zoom, Blinds, Expand Line
+- **GPU-accelerated**: Uses NVIDIA NVENC for fast processing
+- **Automatic fallback**: Continues without transitions if GPU unavailable
+
+Simply select your desired transition from the dropdown menu before processing. Each transition adds approximately 1.5 seconds of effect at both the beginning and end of your videos.
+
+**Requirements**: NVIDIA GPU with NVENC support for transition effects.

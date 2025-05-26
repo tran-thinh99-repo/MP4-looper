@@ -1,7 +1,5 @@
 import tkinter as tk
-import logging
-from tkinter import messagebox
-from utils import center_window, format_duration
+from utils import center_window
 from icon_helper import set_window_icon
 
 class SongPoolDistributionModal(tk.Toplevel):
@@ -13,7 +11,6 @@ class SongPoolDistributionModal(tk.Toplevel):
         self.controller = controller
         
         # Set icon
-        from icon_helper import set_window_icon
         set_window_icon(self)
         
         # Modern dark theme colors
@@ -54,7 +51,7 @@ class SongPoolDistributionModal(tk.Toplevel):
         self.update_song_count()
         
         # Center window
-        self.center_window()
+        center_window()
     
     def create_modern_ui(self):
         """Create beautiful modern UI"""
@@ -505,15 +502,6 @@ class SongPoolDistributionModal(tk.Toplevel):
         b = int(b1 + (b2 - b1) * ratio)
         
         return f"#{r:02x}{g:02x}{b:02x}"
-    
-    def center_window(self):
-        """Center the window on screen"""
-        self.update_idletasks()
-        width = self.winfo_width()
-        height = self.winfo_height()
-        x = (self.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.winfo_screenheight() // 2) - (height // 2)
-        self.geometry(f"{width}x{height}+{x}+{y}")
     
     # Event handlers (keeping the original functionality)
     def on_video_count_changed(self, value):

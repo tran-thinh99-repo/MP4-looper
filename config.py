@@ -1,7 +1,7 @@
 import os
 import sys
 from pathlib import Path
-from paths import get_resource_path, get_base_path
+from paths import get_resource_path
 from dotenv import load_dotenv
 
 # Ensure environment variables are loaded
@@ -31,3 +31,5 @@ MAX_AUTH_AGE = 7 * 24 * 60 * 60  # 7 days in seconds
 AUTH_SHEET_ID = os.getenv("AUTH_SHEET_ID", "13on93GUGOMSHzMw3JemVnQQj0KRfFh-qf5xHd4pbVO0")
 
 DEFAULT_DURATION_SECONDS = 3600
+
+VERSION = "1.2.1"

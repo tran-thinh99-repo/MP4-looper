@@ -10,6 +10,8 @@ import tkinter as tk
 import customtkinter as ctk
 from tkinter import messagebox
 
+from config import VERSION
+
 class UtilityWindow(ctk.CTkToplevel):
     """Detached utility window that follows the main UI"""
     
@@ -294,7 +296,7 @@ class UtilityWindow(ctk.CTkToplevel):
         
         # Version info
         try:
-            version = self.controller.version if hasattr(self.controller, 'version') else "1.2.0"
+            version = self.controller.version if hasattr(self.controller, 'version') else VERSION
             version_label = ctk.CTkLabel(
                 about_frame,
                 text=f"MP4 Looper v{version}\nby EAGLE NET",

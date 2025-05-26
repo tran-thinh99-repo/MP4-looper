@@ -17,7 +17,7 @@ from utils import (setup_logging, disable_cmd_edit_mode, check_environment_vars,
                   open_folder, check_canceled_upload_folder_status)
 from song_utils import generate_distributed_song_lists, generate_song_list_for_batch
 from post_render_check import validate_render
-from config import GITHUB_REPO_NAME, GITHUB_REPO_OWNER
+from config import GITHUB_REPO_NAME, GITHUB_REPO_OWNER, VERSION
 from ui_components import BatchProcessorUI
 from dependency_checker import main as check_dependencies
 from paths import get_resource_path, get_base_path, clean_folder_with_confirmation
@@ -51,7 +51,6 @@ class MP4LooperApp:
         
         # Application settings
         self.app_name = "MP4 Looper"
-        self.version = "1.2.0"  # Production version
 
         # Load sheet presets from environment variables
         self.sheet_presets = {
@@ -61,12 +60,12 @@ class MP4LooperApp:
         
         # Initialize UI and other components
         self.ui = BatchProcessorUI(self)
-        self.ui.title(f"{self.app_name} v{self.version} by EAGLE NET")
+        self.ui.title(f"{self.app_name} v{VERSION} by EAGLE NET")
 
         # One-line update check that will be shown after UI loads
         self.ui.after(1000, lambda: UpdateChecker(
             self.app_name, 
-            self.version, 
+            VERSION, 
             GITHUB_REPO_OWNER, 
             GITHUB_REPO_NAME, 
         ).check_and_notify(self.ui))
