@@ -1538,6 +1538,36 @@ class BatchProcessorUI(TkinterDnD.Tk):
         except Exception as e:
             logging.error(f"Error applying settings to UI: {e}")
 
+    def on_setting_changed(self, setting_name, value):
+        """Handle when a setting is changed through the UI"""
+        try:
+            # Map UI setting names to settings manager paths
+            setting_map = {
+                'output_folder': 'ui.output_folder',
+                'music_folder': 'ui.music_folder',
+                'loop_duration': 'ui.loop_duration',
+                'sheet_url': 'sheets.sheet_url',
+                'sheet_preset': 'sheets.sheet_preset',
+                'use_default_song_count': 'processing.use_default_song_count',
+                'default_song_count': 'processing.default_song_count',
+                'fade_audio': 'processing.fade_audio',
+                'export_timestamp': 'processing.export_timestamp',
+                'auto_upload': 'processing.auto_upload',
+                'transition': 'processing.transition'
+            }
+            
+            # Get the settings path
+            settings_path = setting_map.get(setting_name)
+            if settings_path:
+                # Save the setting
+                self.settings_manager.set(settings_path, value)
+                logging.debug(f"Saved setting {settings_path} = {value}")
+            else:
+                logging.warning(f"Unknown setting name: {setting_name}")
+                
+        except Exception as e:
+            logging.error(f"Error saving setting {setting_name}: {e}")
+
     # 2. Modify the get_current_settings method to include auto_upload (if not already present)
     def get_current_settings(self):
         """Get current settings from UI elements - SIMPLIFIED VERSION"""

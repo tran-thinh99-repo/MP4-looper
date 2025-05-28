@@ -253,5 +253,3 @@ After processing, you'll find these files in your output folder:
 ---
 
 **Need more help?** Use the "Send Debug Info" feature to contact support with detailed information about any issues you're experiencing.
-
-**Version**: 1.2.1 | **Last Updated**: May 2025

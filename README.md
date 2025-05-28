@@ -199,31 +199,6 @@ python mp4_looper.py
 - **Authentication**: Secure login verification
 - **Debug Info**: Only sent when explicitly requested by user
 
-## 📝 Version History
-
-### v1.2.1 (Current)
-
-- Added transitions
-
-### v1.2.0
-- Added song distribution mode for multiple video variants
-- Improved hardware acceleration support
-- Enhanced error handling and recovery
-- Updated user interface with better feedback
-- Added comprehensive help system
-
-### v1.1.0
-- Added Google Sheets integration
-- Implemented batch processing
-- Added drag & drop file handling
-- Improved audio processing quality
-
-### v1.0.0
-- Initial release
-- Basic video looping functionality
-- Simple audio overlay
-- Manual file selection
-
 ## 🤝 Contributing
 
 ### For Developers

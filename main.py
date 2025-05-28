@@ -657,6 +657,42 @@ class MP4LooperApp:
                 time_suffix += f"{s}s" if s > 0 else ""
                 output_name = f"{base_name}_Part{video_num}_{time_suffix}.mp4"
                 
+                # Generate output filename and rename files
+                base_name = os.path.splitext(file_name)[0]
+                h, m, s = format_duration(duration)
+                time_suffix = f"{h}h" if h > 0 else ""
+                time_suffix += f"{m}m" if m > 0 else ""
+                time_suffix += f"{s}s" if s > 0 else ""
+                output_name = f"{base_name}_Part{video_num}_{time_suffix}.mp4"
+
+                # ADDED: Rename timestamp files to match the output video name
+                if 'timestamp_path' in video_info and video_info['timestamp_path']:
+                    old_timestamp_path = video_info['timestamp_path']
+                    if os.path.exists(old_timestamp_path):
+                        # Create new timestamp filename matching the video
+                        new_timestamp_name = f"{base_name}_Part{video_num}_song_list_timestamp.txt"
+                        new_timestamp_path = os.path.join(output_folder, new_timestamp_name)
+                        
+                        try:
+                            # Rename the timestamp file
+                            os.rename(old_timestamp_path, new_timestamp_path)
+                            video_info['timestamp_path'] = new_timestamp_path  # Update the reference
+                            logging.info(f"📝 Renamed timestamp file to: {new_timestamp_name}")
+                        except Exception as e:
+                            logging.error(f"Failed to rename timestamp file: {e}")
+
+                # Also rename the full timestamp file if it exists
+                old_timestamp_full_path = old_timestamp_path.replace('_timestamp.txt', '_timestamp_full.txt') if 'timestamp_path' in video_info else None
+                if old_timestamp_full_path and os.path.exists(old_timestamp_full_path):
+                    new_timestamp_full_name = f"{base_name}_Part{video_num}_song_list_timestamp_full.txt"
+                    new_timestamp_full_path = os.path.join(output_folder, new_timestamp_full_name)
+                    
+                    try:
+                        os.rename(old_timestamp_full_path, new_timestamp_full_path)
+                        logging.info(f"📝 Renamed full timestamp file to: {new_timestamp_full_name}")
+                    except Exception as e:
+                        logging.error(f"Failed to rename full timestamp file: {e}")
+
                 # Video rendering (80% of video progress)
                 ui.update_progress(
                     video_base_progress + (video_progress_range * 0.4),

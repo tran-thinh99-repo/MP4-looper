@@ -253,5 +253,3 @@ Sau khi xử lý, bạn sẽ tìm thấy các file này trong thư mục đầu 
 ---
 
 **Cần thêm trợ giúp?** Sử dụng tính năng "Send Debug Info" để liên hệ hỗ trợ với thông tin chi tiết về bất kỳ vấn đề nào bạn đang gặp phải.
-
-**Phiên bản**:  1.2.1 | **Cập nhật lần cuối**: Tháng 5 2025

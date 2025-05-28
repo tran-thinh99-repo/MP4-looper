@@ -139,8 +139,3 @@ pyyaml>=6.0
 # 3. For production builds, consider freezing exact versions
 # 4. GPU acceleration requires NVIDIA drivers (not Python packages)
 # 5. Google API credentials file must be provided separately
-
-# ===== Version Information =====
-# Generated for MP4 Looper v1.2.0
-# Compatible with Python 3.8+
-# Last updated: December 2024
