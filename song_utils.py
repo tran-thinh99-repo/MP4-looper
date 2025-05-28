@@ -8,7 +8,7 @@ import subprocess
 
 from datetime import datetime
 
-from utils import get_base_path
+from paths import get_base_path
 from post_render_check import get_wav_duration
 from google_services import get_sheets_service
 from api_monitor_module.utils.monitor_access import track_api_call_simple

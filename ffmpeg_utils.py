@@ -37,8 +37,7 @@ def find_executable(name):
     else:
         # Running as script
         app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    
-    logging.debug(f"Application directory: {app_dir}")
+
     
     # Check in application directory and subdirectories
     bundled_locations = [
@@ -59,9 +58,7 @@ def find_executable(name):
     
     # Check bundled locations BEFORE checking PATH
     for location in bundled_locations:
-        logging.debug(f"Checking for {name} at: {location}")
         if os.path.isfile(location) and os.access(location, os.X_OK):
-            logging.info(f"Found bundled {name} at: {location}")
             return location
     
     # LAST RESORT: Fall back to PATH (system installed versions)

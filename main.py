@@ -290,7 +290,7 @@ class MP4LooperApp:
                         # Show a warning if no valid files found
                         messagebox.showwarning("No Valid Files", f"No valid MP4 files found in folder: {folder_name}")
                         
-            elif os.path.isfile(path) and path.lower().endswith('.mp4') and '_edit' not in path.lower():
+            elif os.path.isfile(path) and path.lower().endswith('.mp4'):
                 # For individual files
                 if path in self.ui.file_paths:
                     duplicates.append(path)
